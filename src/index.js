@@ -36,10 +36,10 @@ client.on("messageCreate", async (message) => {
 
   if (!message.content.startsWith("!trade ")) return;
 
-  const match = message.content.match(/!trade\\s+(BUY|SELL)\\s+(BTCUSDT)\\s+([\\d.]+)\\s*(market)?/i);
+  const match = message.content.match(/!trade\s+(BUY|SELL)\s+(BTCUSDT)\s+([\d.]+)\s*(market)?/i);
   console.log('Regex match:', JSON.stringify(match));
   if (!match) {
-    return message.reply("**Format:** `!trade BUY BTCUSDT 0.001 [market]`\nAmount is BTC qty.");
+    return message.reply("**Format:** `!trade BUY BTCUSDT 0.001 [market]`\\nAmount is BTC qty.");
   }
 
   const [, side, symbol, amountStr] = match;
@@ -61,19 +61,19 @@ client.on("messageCreate", async (message) => {
       order = await exchange.createMarketOrder(symbol, side, amount);
       const filled = order.filled || 0;
       const avgPrice = order.average || 'market';
-      message.reply(`✅ **TESTNET TRADE OK!**\n**ID:** \`${order.id}\`\n**Side:** ${side}\n**Symbol:** ${symbol}\n**Amount:** ${amount}\n**Filled:** ${filled}\n**Avg Price:** $${avgPrice}\n**Status:** ${order.status}`);
+      message.reply(`✅ **TESTNET TRADE OK!**\\n**ID:** \\\`${order.id}\\\`\\n**Side:** ${side}\\n**Symbol:** ${symbol}\\n**Amount:** ${amount}\\n**Filled:** ${filled}\\n**Avg Price:** $${avgPrice}\\n**Status:** ${order.status}`);
     } else {
       // DRY-RUN (prod warning)
       order = {
         id: `dry-${Date.now()}`,
         side, symbol, amount, type: 'market', status: 'simulated', filled: amount
       };
-      message.reply(`⚠️ **DRY-RUN MODE** (SANDBOX=true for testnet)\nMock: ${side} ${symbol} ${amount}BTC\nID: \`${order.id}\``);
+      message.reply(`⚠️ **DRY-RUN MODE** (SANDBOX=true for testnet)\\nMock: ${side} ${symbol} ${amount}BTC\\nID: \\\`${order.id}\\\``);
     }
     console.log('Trade result:', order);
   } catch (e) {
     console.error('Trade error:', e);
-    message.reply(`❌ **Failed:** ${e.message}\n- Balance low?\n- Permissions?\n- Markets loaded?`);
+    message.reply(`❌ **Failed:** ${e.message}\\n- Balance low?\\n- Permissions?\\n- Markets loaded?`);
   }
 });
 
