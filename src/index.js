@@ -34,6 +34,23 @@ client.on("messageCreate", async (message) => {
     return message.reply("pong! Ready for trades. 🖤");
   }
 
+  // Auto parse natural signals
+  let side = null;
+  let amount = parseFloat(process.env.PROCESSING_AMOUNT || '0.001');
+  const symbol = 'BTCUSDT';
+  if (/ (?:🚀|buy|long|入|買い|ロング) .*?(?:btc|bitcoin|btcusdt)/i.test(message.content)) {
+    side = 'buy';
+  } else if (/ (?:sell|short|出|売り|ショート) .*?(?:btc)/i.test(message.content)) {
+    side = 'sell';
+  }
+  if (side) {
+    console.log(`Auto signal detected: ${side.toUpperCase()} ${symbol} ${amount}`);
+    // Trade logic (same as command)
+    // ... copy from below
+    // For now, reply preview
+    return message.reply(`🔄 Auto detected **${side.toUpperCase()} ${symbol} ${amount}BTC** (dry preview - PR WIP)`);
+  }
+
   if (!message.content.startsWith("!trade ")) return;
 
   const match = message.content.match(/!trade\s+(BUY|SELL)\s+(BTCUSDT)\s+([\d.]+)\s*(market)?/i);
