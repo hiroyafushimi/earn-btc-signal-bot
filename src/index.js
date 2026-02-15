@@ -28,6 +28,8 @@ client.once("ready", async () => {
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
+  console.log(`Msg from ${message.author.username} (${message.author.id}): len=${message.content.length} | content: ${JSON.stringify(message.content)}`);
+
   if (message.content === "!ping") {
     return message.reply("pong! Ready for trades. 🖤");
   }
@@ -35,6 +37,7 @@ client.on("messageCreate", async (message) => {
   if (!message.content.startsWith("!trade ")) return;
 
   const match = message.content.match(/!trade\\s+(BUY|SELL)\\s+(BTCUSDT)\\s+([\\d.]+)\\s*(market)?/i);
+  console.log('Regex match:', JSON.stringify(match));
   if (!match) {
     return message.reply("**Format:** `!trade BUY BTCUSDT 0.001 [market]`\nAmount is BTC qty.");
   }
