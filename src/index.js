@@ -25,6 +25,29 @@ client.once("ready", async () => {
   }
 });
 
+async function executeTrade(message, side, symbol, amount, orderType = 'market') {
+  console.log(`Executing ${side} ${symbol} ${amount} ${orderType}`);
+  if (!exchange) {
+    return message.reply("Exchange not ready.");
+  }
+  try {
+    let order;
+    if (exchangeConfig.sandbox) {
+      order = await exchange.createMarketOrder(symbol, side, amount);
+      const filled = order.filled || 0;
+      const avgPrice = order.average || 'market';
+      message.reply(`✅ **TESTNET TRADE OK!**\\n**ID:** \\\`${order.id}\\\`\\n**Side:** ${side}\\n**Symbol:** ${symbol}\\n**Amount:** ${amount}\\n**Filled:** ${filled}\\n**Avg Price:** $${avgPrice}\\n**Status:** ${order.status}`);
+    } else {
+      order = { id: `dry-${Date.now()}`, side, symbol, amount, type: orderType, status: 'simulated', filled: amount };
+      message.reply(`⚠️ **DRY-RUN** (SANDBOX=true for testnet)\\nMock: ${side} ${symbol} ${amount}\\nID: \\\`${order.id}\\\``);
+    }
+    console.log('Trade result:', order);
+  } catch (e) {
+    console.error('Trade error:', e);
+    message.reply(`❌ **Failed:** ${e.message}\\nBalance/Permissions?`);
+  }
+}
+
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
@@ -34,18 +57,20 @@ client.on("messageCreate", async (message) => {
     return message.reply("pong! Ready for trades. 🖤");
   }
 
-  // Auto parse natural signals
+  // Auto parse
   let autoSide = null;
   let autoAmount = parseFloat(process.env.PROCESSING_AMOUNT || '0.001');
-  const autoSymbol = 'BTCUSDT';
-  if (/ (?:🚀|buy|long|入|買い|ロング) .*?(?:btc|bitcoin|btcusdt)/i.test(message.content)) {
+  const symbol = 'BTCUSDT';
+  const autoRegex = /(?:🚀|buy|long|入|買い|ロング).*?(?:btc|bitcoin|btcusdt)/i;
+  const autoRegexSell = /(?:sell|short|出|売り|ショート).*?(?:btc)/i;
+  if (autoRegex.test(message.content)) {
     autoSide = 'buy';
-  } else if (/ (?:sell|short|出|売り|ショート) .*?(?:btc)/i.test(message.content)) {
+  } else if (autoRegexSell.test(message.content)) {
     autoSide = 'sell';
   }
   if (autoSide) {
-    console.log(`Auto signal detected: ${autoSide.toUpperCase()} ${autoSymbol} ${autoAmount}`);
-    return message.reply(`🔄 Auto **${autoSide.toUpperCase()} ${autoSymbol} ${autoAmount}BTC** preview (full WIP)`);
+    console.log(`Auto: ${autoSide.toUpperCase()} ${symbol} ${autoAmount}`);
+    return executeTrade(message, autoSide, symbol, autoAmount);
   }
 
   if (!message.content.startsWith("!trade ")) return;
@@ -53,40 +78,16 @@ client.on("messageCreate", async (message) => {
   const match = message.content.match(/!trade\s+(BUY|SELL)\s+(BTCUSDT)\s+([\d.]+)\s*(market)?/i);
   console.log('Regex match:', JSON.stringify(match));
   if (!match) {
-    return message.reply("**Format:** `!trade BUY BTCUSDT 0.001 [market]`\\nAmount is BTC qty.");
+    return message.reply("**Format:** `!trade BUY BTCUSDT 0.001 [market]`");
   }
 
-  const [, side, symbol, amountStr] = match;
+  const [, side, symbolCheck, amountStr] = match;
   const amount = parseFloat(amountStr);
   if (isNaN(amount) || amount <= 0) {
     return message.reply("Invalid amount >0");
   }
 
-  console.log(`Processing ${side} ${symbol} ${amount}BTC`);
-
-  if (!exchange) {
-    return message.reply("Exchange not ready. Check .env.");
-  }
-
-  try {
-    let order;
-    if (exchangeConfig.sandbox) {
-      order = await exchange.createMarketOrder(symbol, side, amount);
-      const filled = order.filled || 0;
-      const avgPrice = order.average || 'market';
-      message.reply(`✅ **TESTNET TRADE OK!**\\n**ID:** \\\`${order.id}\\\`\\n**Side:** ${side}\\n**Symbol:** ${symbol}\\n**Amount:** ${amount}\\n**Filled:** ${filled}\\n**Avg Price:** $${avgPrice}\\n**Status:** ${order.status}`);
-    } else {
-      order = {
-        id: `dry-${Date.now()}`,
-        side, symbol, amount, type: 'market', status: 'simulated', filled: amount
-      };
-      message.reply(`⚠️ **DRY-RUN MODE** (SANDBOX=true for testnet)\\nMock: ${side} ${symbol} ${amount}BTC\\nID: \\\`${order.id}\\\``);
-    }
-    console.log('Trade result:', order);
-  } catch (e) {
-    console.error('Trade error:', e);
-    message.reply(`❌ **Failed:** ${e.message}\\n- Balance low?\\n- Permissions?\\n- Markets loaded?`);
-  }
+  return executeTrade(message, side, 'BTCUSDT', amount);
 });
 
 if (!process.env.DISCORD_TOKEN) {
