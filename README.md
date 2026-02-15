@@ -1,32 +1,56 @@
-# Earn BTC Signal Bot 🖤
+# Earn BTC Signal Bot v1 🖤
 
-DiscordからBTCシグナル（例: \"BUY BTC @ $60k\"）を受信し、取引所APIで自動実行するボット。
+## 概要
+Discordシグナル自動Bitcoinトレードボット (Binance)。
 
-## Features (Planned)
-- Discordメッセージ解析
-- CCXT経由の取引所トレード (Binance/Bybitなど)
-- リスク管理 (position size, stop loss)
-- Telegram通知
+## セットアップ (5分)
 
-## Quick Start
-1. Discord Bot作成: https://discord.com/developers/applications
-2. Botをサーバーに招待 (Message Content intent ON)
-3. `npm install discord.js ccxt dotenv`
-4. `.env`設定
-5. `npm start`
-
-## .env Example
+1. clone
 ```
-DISCORD_TOKEN=your_discord_bot_token
-EXCHANGE=binance  # or bybit
+git clone https://github.com/hiroyafushimi/earn-btc-signal-bot.git
+cd earn-btc-signal-bot
+npm i
+```
+
+2. Discord Bot
+- https://discord.com/developers/applications → New → Bot → Token .env
+- OAuth2 → bot scope → perms Send/Read → URLでguild招待
+- Bot tab → Message Content Intent ON
+
+3. Binance Testnet API
+- https://testnet.binance.vision → GitHub login → API Management → Create → TRADE ON → .env
+
+4. .env
+```
+DISCORD_TOKEN=xxx
+EXCHANGE=binance
 API_KEY=xxx
 API_SECRET=xxx
+SANDBOX=true
+RISK_PCT=0.01
+PROCESSING_AMOUNT=0.001
 ```
 
-## Signal Format
-- BUY BTCUSDT 60000 (market)
-- SELL BTC 0.01 55000 (limit)
+5. run
+```
+npm start
+```
 
-TODO: Signal parser実装。
+## 使用法
+- `!trade BUY BTCUSDT 0.001` → BUY
+- `🚀 BUY BTC` → auto BUY 0.001 (or RISK_PCT %)
 
-Review & mergeお願い！
+## 本番
+- SANDBOX=false mainnet key (HIGH RISK!)
+- pm2 start ecosystem.config.js (VPS)
+
+## カスタム
+- RISK_PCT=0.05 (5%)
+- PROCESSING_AMOUNT=0.01 fixed
+- symbol変更
+
+## 警告
+- 損失リスク自己責任
+- 金融法注意
+
+v1.1 SL/TP soon🖤
