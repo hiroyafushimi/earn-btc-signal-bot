@@ -36,17 +36,16 @@ client.on("messageCreate", async (message) => {
 
   // Auto parse natural signals
   let autoSide = null;
-  let amount = parseFloat(process.env.PROCESSING_AMOUNT || '0.001');
-  const symbol = 'BTCUSDT';
+  let autoAmount = parseFloat(process.env.PROCESSING_AMOUNT || '0.001');
+  const autoSymbol = 'BTCUSDT';
   if (/ (?:🚀|buy|long|入|買い|ロング) .*?(?:btc|bitcoin|btcusdt)/i.test(message.content)) {
     autoSide = 'buy';
   } else if (/ (?:sell|short|出|売り|ショート) .*?(?:btc)/i.test(message.content)) {
     autoSide = 'sell';
   }
   if (autoSide) {
-    console.log(`Auto signal detected: ${autoSide.toUpperCase()} ${symbol} ${amount}`);
-    // Trade logic preview
-    return message.reply(`🔄 Auto **${autoSide.toUpperCase()} ${symbol} ${amount}BTC** preview (full WIP)`);
+    console.log(`Auto signal detected: ${autoSide.toUpperCase()} ${autoSymbol} ${autoAmount}`);
+    return message.reply(`🔄 Auto **${autoSide.toUpperCase()} ${autoSymbol} ${autoAmount}BTC** preview (full WIP)`);
   }
 
   if (!message.content.startsWith("!trade ")) return;
@@ -72,13 +71,11 @@ client.on("messageCreate", async (message) => {
   try {
     let order;
     if (exchangeConfig.sandbox) {
-      // REAL TESTNET TRADE
       order = await exchange.createMarketOrder(symbol, side, amount);
       const filled = order.filled || 0;
       const avgPrice = order.average || 'market';
       message.reply(`✅ **TESTNET TRADE OK!**\\n**ID:** \\\`${order.id}\\\`\\n**Side:** ${side}\\n**Symbol:** ${symbol}\\n**Amount:** ${amount}\\n**Filled:** ${filled}\\n**Avg Price:** $${avgPrice}\\n**Status:** ${order.status}`);
     } else {
-      // DRY-RUN (prod warning)
       order = {
         id: `dry-${Date.now()}`,
         side, symbol, amount, type: 'market', status: 'simulated', filled: amount
