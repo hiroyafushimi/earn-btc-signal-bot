@@ -34,12 +34,14 @@ index.js (Express /health + graceful shutdown)
 
 | ファイル | 役割 |
 |----------|------|
-| `src/index.js` | エントリポイント。Exchange初期化 → 両Bot起動 → シグナル監視 → Express ヘルスチェック → graceful shutdown |
+| `src/index.js` | エントリポイント。Exchange/Stripe 初期化 → 両Bot起動 → シグナル監視 → Express (health, webhook, subscribe) → graceful shutdown |
 | `src/logger.js` | タイムスタンプ付き統一ロガー + uptime 管理 |
-| `src/exchange.js` | ccxt Binance 接続。価格取得・トレード実行 (最大3回リトライ + 指数バックオフ) |
-| `src/signal.js` | BTC 価格定期監視 → シグナル生成 → クールダウン制御 → 履歴 JSON 保存 → 日次サマリー |
-| `src/discord-bot.js` | Discord Bot (!trade, !price, !status, !history) + シグナル/サマリー自動配信 |
+| `src/exchange.js` | ccxt Binance 接続。価格取得・OHLCV取得・トレード実行 (最大3回リトライ + 指数バックオフ) |
+| `src/indicators.js` | テクニカル分析指標 (SMA, RSI, SMAクロスオーバー, 総合スコア判定) |
+| `src/signal.js` | BTC 価格定期監視 → 指標分析 → 複数時間足確認 → シグナル生成 → クールダウン → 履歴保存 → 日次サマリー |
+| `src/discord-bot.js` | Discord Bot (!trade, !price, !status, !history, !subscribe) + シグナル/サマリー自動配信 |
 | `src/telegram-bot.js` | Telegram Bot (/price, /status, /history, /subscribe) + シグナル/サマリー自動配信 |
+| `src/subscription.js` | Stripe Checkout Session 生成 + Webhook 処理 + ユーザー管理 (JSON) |
 
 ## 運用機能
 
@@ -68,6 +70,18 @@ index.js (Express /health + graceful shutdown)
 
 - SIGINT/SIGTERM でシグナル監視停止 → 両Bot切断 → プロセス終了
 
+### トレード権限制限
+
+- `ADMIN_DISCORD_IDS` / `ADMIN_TELEGRAM_IDS` にユーザー ID をカンマ区切りで設定
+- 設定時: 指定ユーザーのみトレード実行可能
+- 未設定 (空): 全ユーザーがトレード実行可能
+- シグナル閲覧 (!price, /price 等) は全ユーザーに開放
+
+### Telegram トークン検証
+
+- `TELEGRAM_BOT_TOKEN` が未設定またはフォーマット不正の場合は自動スキップ (プロセスは落ちない)
+- grammy のエラーハンドリングにより、Telegram API エラーでもプロセスは継続
+
 ## コマンド一覧
 
 ### Discord
@@ -78,6 +92,7 @@ index.js (Express /health + graceful shutdown)
 | `!price` | BTC/USDT 現在価格 |
 | `!status` | Bot ステータス (uptime, シグナル数, 最終シグナル) |
 | `!history` | 直近シグナル一覧 (最大5件) |
+| `!subscribe` | サブスク登録 ($5/月 Stripe) |
 | `!trade buy/sell` | BTC トレード実行 |
 
 ### Telegram
@@ -106,19 +121,27 @@ index.js (Express /health + graceful shutdown)
 リスク: X%
 ```
 
-### 現在の判定基準
+### 判定基準 (テクニカル指標ベース)
 
-- 直近5件の平均価格と現在価格を比較
-- 1% 以上下落 → BUY シグナル (反発期待)
-- 1% 以上上昇 → SELL シグナル (利確推奨)
+データ21件以上で分析開始。以下のスコアリングで BUY/SELL を判定:
+
+| 指標 | BUY 条件 | SELL 条件 | スコア |
+|------|----------|-----------|--------|
+| RSI (14) | < 30 (売られすぎ) | > 70 (買われすぎ) | +2 |
+| RSI (14) | < 40 (低め) | > 60 (高め) | +1 |
+| SMA クロス | ゴールデンクロス (SMA5 > SMA20) | デスクロス (SMA5 < SMA20) | +3 |
+| トレンド位置 | 価格 > SMA5 > SMA20 | 価格 < SMA5 < SMA20 | +1 |
+| 1h 足確認 | 1h 足でも同方向 | 1h 足でも同方向 | +1 |
+
+- **合計スコア 2 以上**でシグナル発行
 - 同方向シグナルはクールダウン期間中は抑制
+- シグナルに根拠 (reasons) を付与して配信
 
 ### 拡張予定
 
-- 移動平均 (MA) クロスオーバー
-- RSI (相対力指数) ベースのシグナル
+- MACD (Moving Average Convergence Divergence)
 - ボリューム分析
-- 複数時間足の分析
+- バックテスト検証
 
 ## 環境変数
 
@@ -136,9 +159,13 @@ index.js (Express /health + graceful shutdown)
 | RISK_PCT | No | 残高に対するリスク割合 (default: 0.01) |
 | SIGNAL_INTERVAL | No | シグナルチェック間隔 ms (default: 60000) |
 | SIGNAL_COOLDOWN | No | 同方向シグナル最小間隔 ms (default: 300000) |
+| ADMIN_DISCORD_IDS | No | トレード許可 Discord ユーザー ID (カンマ区切り、空=全員許可) |
+| ADMIN_TELEGRAM_IDS | No | トレード許可 Telegram ユーザー ID (カンマ区切り、空=全員許可) |
 | PORT | No | Express ヘルスチェックポート (default: 3000) |
-| STRIPE_SECRET_KEY | No | Stripe シークレットキー (Phase 3) |
+| STRIPE_SECRET_KEY | No | Stripe シークレットキー (未設定時は決済無効) |
+| STRIPE_WEBHOOK_SECRET | No | Stripe Webhook 署名検証シークレット |
 | SUBSCRIPTION_PRICE | No | 月額料金 USD (default: 5) |
+| BASE_URL | No | Webhook/決済リダイレクト用 URL (default: http://localhost:3000) |
 
 Discord / Telegram はどちらか一方のトークンだけ設定すれば、そのプラットフォームのみで動作する。両方設定すれば両方で動作する。
 
@@ -147,6 +174,7 @@ Discord / Telegram はどちらか一方のトークンだけ設定すれば、�
 | パス | 内容 |
 |------|------|
 | `data/signals.json` | シグナル履歴 (直近500件、自動生成、gitignore 済み) |
+| `data/subscribers.json` | サブスクライバー情報 (platform:userId → Stripe ID, status 等) |
 
 ## 開発ロードマップ
 
@@ -169,20 +197,30 @@ Discord / Telegram はどちらか一方のトークンだけ設定すれば、�
 - [x] Express ヘルスチェック (/health)
 - [x] グレースフルシャットダウン (SIGINT/SIGTERM)
 - [x] !status, !history / /status, /history コマンド
+- [x] トレード権限制限 (ADMIN_DISCORD_IDS / ADMIN_TELEGRAM_IDS)
+- [x] Telegram トークン検証 + エラーハンドリング
+- [x] discord.js v15 対応 (Events.ClientReady)
+- [x] 未使用依存削除 (body-parser)
 
-### Phase 2: シグナル強化
+### Phase 2: シグナル強化 (完了)
 
-- [ ] テクニカル分析指標 (MA, RSI, MACD)
-- [ ] シグナル精度の検証・バックテスト
-- [ ] シグナル履歴・パフォーマンス記録
+- [x] テクニカル分析指標 (SMA, RSI, SMA クロスオーバー)
+- [x] スコアリングベースの総合判定 (強度 + 根拠表示)
+- [x] 複数時間足分析 (1h ローソク足で方向確認)
+- [x] OHLCV データ取得 (exchange.js)
+- [ ] MACD 追加
+- [ ] バックテスト検証
 - [ ] 複数通貨ペア対応
 
-### Phase 3: サブスクリプション ($5/月)
+### Phase 3: サブスクリプション $5/月 (完了)
 
-- [ ] Stripe 連携
-- [ ] ユーザー登録・認証フロー
-- [ ] 有料チャンネルのアクセス制御
-- [ ] 決済 Webhook 処理
+- [x] Stripe Checkout Session 生成 (subscription.js)
+- [x] ユーザー管理 (data/subscribers.json)
+- [x] Discord !subscribe / Telegram /subscribe で決済リンク生成
+- [x] Stripe Webhook 処理 (POST /webhook/stripe)
+- [x] 決済完了/キャンセルページ (/subscribe/success, /subscribe/cancel)
+- [x] サブスクライバー数を !status / /status / /health に表示
+- [ ] 有料チャンネルのアクセス制御 (サブスク有無でシグナル制限)
 
 ### Phase 4: 運用・スケール
 

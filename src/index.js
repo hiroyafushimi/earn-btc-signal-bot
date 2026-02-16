@@ -6,6 +6,7 @@ const { initExchange, getExchange } = require("./exchange");
 const { startMonitor, stopMonitor, getSignalStats } = require("./signal");
 const { startDiscordBot, stopDiscordBot } = require("./discord-bot");
 const { startTelegramBot, stopTelegramBot } = require("./telegram-bot");
+const { initStripe, handleWebhook, getSubscriberCount } = require("./subscription");
 
 const MOD = "Main";
 const PORT = parseInt(process.env.PORT || "3000", 10);
@@ -20,26 +21,30 @@ async function main() {
     error(MOD, "Exchange init failed, continuing without trade:", e.message);
   }
 
-  // 2. Discord Bot
+  // 2. Stripe
+  initStripe();
+
+  // 3. Discord Bot
   try {
     await startDiscordBot();
   } catch (e) {
     error(MOD, "Discord bot failed:", e.message);
   }
 
-  // 3. Telegram Bot
+  // 4. Telegram Bot
   try {
     await startTelegramBot();
   } catch (e) {
     error(MOD, "Telegram bot failed:", e.message);
   }
 
-  // 4. Signal monitor
+  // 5. Signal monitor
   startMonitor();
 
-  // 5. Express health check
+  // 6. Express server
   const app = express();
 
+  // Health check
   app.get("/health", (req, res) => {
     const ex = getExchange();
     const stats = getSignalStats();
@@ -53,11 +58,41 @@ async function main() {
         sandbox: process.env.SANDBOX === "true",
       },
       signals: stats,
+      subscribers: getSubscriberCount(),
     });
   });
 
+  // Stripe webhook (raw body required for signature verification)
+  app.post(
+    "/webhook/stripe",
+    express.raw({ type: "application/json" }),
+    async (req, res) => {
+      try {
+        const sig = req.headers["stripe-signature"];
+        const result = await handleWebhook(req.body, sig);
+        res.json(result);
+      } catch (e) {
+        error(MOD, "Stripe webhook error:", e.message);
+        res.status(400).json({ error: e.message });
+      }
+    },
+  );
+
+  // Subscribe success/cancel pages
+  app.get("/subscribe/success", (req, res) => {
+    res.send(
+      "<html><body><h1>登録完了</h1><p>BTC シグナル (#BTCto70k) のサブスクリプションが有効になりました。Bot に戻ってご利用ください。</p></body></html>",
+    );
+  });
+
+  app.get("/subscribe/cancel", (req, res) => {
+    res.send(
+      "<html><body><h1>キャンセル</h1><p>登録がキャンセルされました。再度 /subscribe でお試しください。</p></body></html>",
+    );
+  });
+
   app.listen(PORT, () => {
-    log(MOD, `Health check: http://localhost:${PORT}/health`);
+    log(MOD, `Server: http://localhost:${PORT} (health, webhook, subscribe)`);
   });
 
   log(MOD, "btc-signal-bot ready! #BTCto70k");

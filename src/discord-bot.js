@@ -1,11 +1,18 @@
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, Events, GatewayIntentBits } = require("discord.js");
 const { executeTrade, fetchPrice } = require("./exchange");
 const { onSignal, onDailySummary, getSignalStats, getRecentSignals } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
+const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
 
 const MOD = "Discord";
 let client;
 let signalChannelId;
+let adminIds;
+
+function isAdmin(userId) {
+  if (!adminIds) return true;
+  return adminIds.includes(userId);
+}
 
 async function startDiscordBot() {
   const token = process.env.DISCORD_TOKEN;
@@ -15,6 +22,9 @@ async function startDiscordBot() {
   }
 
   signalChannelId = process.env.DISCORD_SIGNAL_CHANNEL_ID;
+  adminIds = process.env.ADMIN_DISCORD_IDS
+    ? process.env.ADMIN_DISCORD_IDS.split(",").map((id) => id.trim())
+    : null;
 
   client = new Client({
     intents: [
@@ -24,7 +34,7 @@ async function startDiscordBot() {
     ],
   });
 
-  client.once("ready", () => {
+  client.once(Events.ClientReady, () => {
     log(MOD, `Bot ready: ${client.user.tag}`);
   });
 
@@ -65,6 +75,7 @@ async function startDiscordBot() {
           `シグナル: BUY ${stats.totalBuy} / SELL ${stats.totalSell}`,
           `最終シグナル: ${lastAt}`,
           `履歴件数: ${stats.historyCount}`,
+          `サブスクライバー: ${getSubscriberCount()}`,
         ].join("\n"),
       );
     }
@@ -82,6 +93,29 @@ async function startDiscordBot() {
       return message.reply(
         [`**直近シグナル (${recent.length}件)**`, ...lines].join("\n"),
       );
+    }
+
+    // !subscribe
+    if (message.content === "!subscribe") {
+      if (!stripeEnabled()) {
+        return message.reply("サブスクリプション: $5/月\n決済連携は準備中です。");
+      }
+      const sub = isSubscribed("discord", message.author.id);
+      if (sub) {
+        return message.reply("✅ サブスク有効です。#BTCto70k");
+      }
+      try {
+        const url = await createCheckoutSession(
+          "discord",
+          message.author.id,
+          message.author.username,
+        );
+        return message.reply(
+          `サブスクリプション: $5/月\n決済はこちら: ${url}`,
+        );
+      } catch (e) {
+        return message.reply(`Error: ${e.message}`);
+      }
     }
 
     // Trade detection
@@ -102,6 +136,10 @@ async function startDiscordBot() {
     }
 
     if (!side) return;
+
+    if (!isAdmin(message.author.id)) {
+      return message.reply("⛔ トレード権限がありません");
+    }
 
     try {
       const result = await executeTrade(side, "BTC/USDT", amount);

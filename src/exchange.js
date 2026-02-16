@@ -95,4 +95,19 @@ async function executeTrade(side, symbol = "BTC/USDT", amount) {
   };
 }
 
-module.exports = { initExchange, getExchange, fetchPrice, executeTrade };
+async function fetchOHLCV(symbol = "BTC/USDT", timeframe = "1h", limit = 50) {
+  if (!exchange) throw new Error("Exchange not ready");
+  return withRetry(async () => {
+    const candles = await exchange.fetchOHLCV(symbol, timeframe, undefined, limit);
+    return candles.map((c) => ({
+      timestamp: c[0],
+      open: c[1],
+      high: c[2],
+      low: c[3],
+      close: c[4],
+      volume: c[5],
+    }));
+  }, `fetchOHLCV(${symbol},${timeframe})`);
+}
+
+module.exports = { initExchange, getExchange, fetchPrice, fetchOHLCV, executeTrade };

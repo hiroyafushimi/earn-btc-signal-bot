@@ -2,18 +2,28 @@ const { Bot } = require("grammy");
 const { fetchPrice, executeTrade } = require("./exchange");
 const { onSignal, onDailySummary, getSignalStats, getRecentSignals } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
+const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
 
 const MOD = "Telegram";
 let bot;
+let adminIds;
+
+function isAdmin(userId) {
+  if (!adminIds) return true;
+  return adminIds.includes(String(userId));
+}
 
 async function startTelegramBot() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) {
-    log(MOD, "TELEGRAM_BOT_TOKEN not set, skipping");
+  if (!token || !/^\d+:[\w-]+$/.test(token)) {
+    log(MOD, "TELEGRAM_BOT_TOKEN not set or invalid, skipping");
     return null;
   }
 
   const channelId = process.env.TELEGRAM_CHANNEL_ID;
+  adminIds = process.env.ADMIN_TELEGRAM_IDS
+    ? process.env.ADMIN_TELEGRAM_IDS.split(",").map((id) => id.trim())
+    : null;
 
   bot = new Bot(token);
 
@@ -67,6 +77,7 @@ async function startTelegramBot() {
         `シグナル: BUY ${stats.totalBuy} / SELL ${stats.totalSell}`,
         `最終シグナル: ${lastAt}`,
         `履歴件数: ${stats.historyCount}`,
+        `サブスクライバー: ${getSubscriberCount()}`,
       ].join("\n"),
     );
   });
@@ -88,15 +99,27 @@ async function startTelegramBot() {
 
   // /subscribe
   bot.command("subscribe", async (ctx) => {
-    await ctx.reply(
-      [
-        "サブスクリプション: $5/月",
-        "",
-        "BTC シグナル (#BTCto70k) の全配信を受け取れます。",
-        "",
-        "決済連携は準備中です。",
-      ].join("\n"),
-    );
+    if (!stripeEnabled()) {
+      return ctx.reply(
+        "サブスクリプション: $5/月\n\n決済連携は準備中です。",
+      );
+    }
+    const sub = isSubscribed("telegram", ctx.from.id);
+    if (sub) {
+      return ctx.reply("✅ サブスク有効です。#BTCto70k");
+    }
+    try {
+      const url = await createCheckoutSession(
+        "telegram",
+        ctx.from.id,
+        ctx.from.username || ctx.from.first_name,
+      );
+      await ctx.reply(
+        `サブスクリプション: $5/月\n\n決済はこちら:\n${url}`,
+      );
+    } catch (e) {
+      await ctx.reply(`Error: ${e.message}`);
+    }
   });
 
   // /help
@@ -130,6 +153,10 @@ async function startTelegramBot() {
 
     if (!side) return;
 
+    if (!isAdmin(ctx.from.id)) {
+      return ctx.reply("⛔ トレード権限がありません");
+    }
+
     const amount = parseFloat(process.env.PROCESSING_AMOUNT || "0.001");
 
     try {
@@ -162,7 +189,15 @@ async function startTelegramBot() {
     }
   });
 
-  bot.start();
+  bot.catch((err) => {
+    error(MOD, "Bot error:", err.message);
+  });
+
+  bot.start().catch((err) => {
+    error(MOD, "Bot start failed:", err.message);
+    bot = null;
+  });
+
   log(MOD, "Bot started");
   return bot;
 }

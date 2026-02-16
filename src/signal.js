@@ -1,7 +1,8 @@
 const fs = require("fs");
 const path = require("path");
-const { fetchPrice } = require("./exchange");
+const { fetchPrice, fetchOHLCV } = require("./exchange");
 const { log, error } = require("./logger");
+const { analyzeIndicators, sma, rsi } = require("./indicators");
 
 const MOD = "Signal";
 const INTERVAL = parseInt(process.env.SIGNAL_INTERVAL || "60000", 10);
@@ -86,7 +87,7 @@ function formatSignal(signal) {
     currency: "USD",
   });
 
-  return [
+  const lines = [
     `#BTCto70k シグナル`,
     ``,
     `方向: ${signal.side}`,
@@ -95,43 +96,41 @@ function formatSignal(signal) {
     `ターゲット: ${target}`,
     `ストップロス: ${sl}`,
     `リスク: ${signal.riskPct}%`,
-    ``,
-    `${new Date(signal.timestamp).toISOString()}`,
-  ].join("\n");
+    `強度: ${signal.strength || "-"}/6`,
+  ];
+
+  if (signal.reasons && signal.reasons.length > 0) {
+    lines.push(``, `根拠:`);
+    for (const r of signal.reasons) {
+      lines.push(`  - ${r}`);
+    }
+  }
+
+  lines.push(``, `${new Date(signal.timestamp).toISOString()}`);
+  return lines.join("\n");
 }
 
-function analyze(prices) {
-  if (prices.length < 5) return null;
+function analyze(priceObjs) {
+  const prices = priceObjs.map((p) => p.last);
+  if (prices.length < 21) return null;
 
-  const recent = prices.slice(-5);
-  const avg = recent.reduce((s, p) => s + p.last, 0) / recent.length;
-  const current = recent[recent.length - 1];
+  const result = analyzeIndicators(prices);
+  if (!result) return null;
 
-  if (current.last < avg * 0.99) {
-    return {
-      side: "BUY",
-      symbol: "BTC/USDT",
-      price: current.last,
-      target: Math.round(current.last * 1.03),
-      stopLoss: Math.round(current.last * 0.98),
-      riskPct: 1,
-      timestamp: Date.now(),
-    };
-  }
+  const current = prices[prices.length - 1];
+  const isBuy = result.side === "BUY";
 
-  if (current.last > avg * 1.01) {
-    return {
-      side: "SELL",
-      symbol: "BTC/USDT",
-      price: current.last,
-      target: Math.round(current.last * 0.97),
-      stopLoss: Math.round(current.last * 1.02),
-      riskPct: 1,
-      timestamp: Date.now(),
-    };
-  }
-
-  return null;
+  return {
+    side: result.side,
+    symbol: "BTC/USDT",
+    price: current,
+    target: Math.round(current * (isBuy ? 1.03 : 0.97)),
+    stopLoss: Math.round(current * (isBuy ? 0.98 : 1.02)),
+    riskPct: 1,
+    strength: result.strength,
+    reasons: result.reasons,
+    timestamp: Date.now(),
+  };
 }
 
 function isCooldownActive(side) {
@@ -169,7 +168,16 @@ async function tick() {
       priceHistory = priceHistory.slice(-100);
     }
 
-    log(MOD, `BTC/USDT: $${price.last}`);
+    const prices = priceHistory.map((p) => p.last);
+    const currentRsi = prices.length >= 15 ? rsi(prices, 14) : null;
+    const sma5 = sma(prices, 5);
+    const sma20 = sma(prices, 20);
+    const rsiStr = currentRsi !== null ? ` RSI:${currentRsi.toFixed(1)}` : "";
+    const smaStr =
+      sma5 && sma20
+        ? ` SMA5:$${Math.round(sma5)} SMA20:$${Math.round(sma20)}`
+        : "";
+    log(MOD, `BTC/USDT: $${price.last}${rsiStr}${smaStr}`);
 
     const signal = analyze(priceHistory);
     if (signal) {
@@ -177,6 +185,24 @@ async function tick() {
         log(MOD, `Cooldown active for ${signal.side}, skipped`);
         return;
       }
+
+      // 複数時間足で確認 (1h ローソク足)
+      try {
+        const candles1h = await fetchOHLCV("BTC/USDT", "1h", 30);
+        if (candles1h.length >= 21) {
+          const closes1h = candles1h.map((c) => c.close);
+          const htfResult = analyzeIndicators(closes1h);
+          if (htfResult && htfResult.side === signal.side) {
+            signal.strength += 1;
+            signal.reasons.push("1h足でも同方向");
+          } else if (htfResult && htfResult.side !== signal.side) {
+            log(MOD, `1h足と方向不一致 (${signal.side} vs ${htfResult.side}), 弱めシグナル`);
+          }
+        }
+      } catch (e) {
+        log(MOD, `OHLCV fetch skipped: ${e.message}`);
+      }
+
       await emitSignal(signal);
     }
   } catch (e) {
