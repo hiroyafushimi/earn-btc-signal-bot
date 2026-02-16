@@ -1,84 +1,94 @@
 require("dotenv").config();
-const { Client, GatewayIntentBits } = require("discord.js");
-const ccxt = require("ccxt");
 
-const EXCHANGE = process.env.EXCHANGE || "binance";
-const exchangeConfig = {
-  apiKey: process.env.API_KEY,
-  secret: process.env.API_SECRET,
-  sandbox: process.env.SANDBOX === "true",
-};
+const express = require("express");
+const { log, error, uptimeFormatted, getStartedAt } = require("./logger");
+const { initExchange, getExchange } = require("./exchange");
+const { startMonitor, stopMonitor, getSignalStats } = require("./signal");
+const { startDiscordBot, stopDiscordBot } = require("./discord-bot");
+const { startTelegramBot, stopTelegramBot } = require("./telegram-bot");
 
-let exchange;
+const MOD = "Main";
+const PORT = parseInt(process.env.PORT || "3000", 10);
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-  ],
-});
+async function main() {
+  log(MOD, "btc-signal-bot starting... #BTCto70k");
 
-client.once("ready", async () => {
-  console.log("Earn BTC Signal Bot v1 ready! 🖤");
+  // 1. Exchange
   try {
-    exchange = new ccxt[EXCHANGE](exchangeConfig);
-    await exchange.loadMarkets();
-    console.log(`${EXCHANGE} loaded. Sandbox: ${exchangeConfig.sandbox}`);
+    await initExchange();
   } catch (e) {
-    console.error("Exchange init failed:", e.message);
-  }
-});
-
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-
-  const content = message.content.toLowerCase();
-  console.log(`Msg: ${message.author.username} | ${message.content}`);
-
-  if (message.content === "!ping") return message.reply("pong v1 🖤");
-
-  let side, amount;
-  const symbol = "BTCUSDT";
-  const riskPct = parseFloat(process.env.RISK_PCT || "0");
-  const fixedAmount = parseFloat(process.env.PROCESSING_AMOUNT || "0.001");
-
-  // Command
-  const cmdMatch = content.match(/!trades+(buy|sell)/i);
-  if (cmdMatch) {
-    side = cmdMatch[1];
-    amount = fixedAmount;
-  } else {
-    // Auto
-    if (/(?:🚀|buy|long|入|買い)/.test(content)) {
-      side = "buy";
-    } else if (/(?:sell|short|出|売り)/.test(content)) {
-      side = "sell";
-    }
-    amount = fixedAmount;
+    error(MOD, "Exchange init failed, continuing without trade:", e.message);
   }
 
-  if (!side) return;
-
-  console.log(`Trade: ${side} ${symbol} ${amount}`);
-
-  if (riskPct > 0) {
-    const balance = await exchange.fetchBalance();
-    const usdtFree = balance.free.USDT || 0;
-    const ticker = await exchange.fetchTicker(symbol);
-    amount = (usdtFree * riskPct) / ticker.last;
+  // 2. Discord Bot
+  try {
+    await startDiscordBot();
+  } catch (e) {
+    error(MOD, "Discord bot failed:", e.message);
   }
 
-  if (!exchange) return message.reply("Exchange not ready.");
+  // 3. Telegram Bot
+  try {
+    await startTelegramBot();
+  } catch (e) {
+    error(MOD, "Telegram bot failed:", e.message);
+  }
+
+  // 4. Signal monitor
+  startMonitor();
+
+  // 5. Express health check
+  const app = express();
+
+  app.get("/health", (req, res) => {
+    const ex = getExchange();
+    const stats = getSignalStats();
+    res.json({
+      status: "ok",
+      uptime: uptimeFormatted(),
+      startedAt: new Date(getStartedAt()).toISOString(),
+      exchange: {
+        connected: !!ex,
+        name: process.env.EXCHANGE || "binance",
+        sandbox: process.env.SANDBOX === "true",
+      },
+      signals: stats,
+    });
+  });
+
+  app.listen(PORT, () => {
+    log(MOD, `Health check: http://localhost:${PORT}/health`);
+  });
+
+  log(MOD, "btc-signal-bot ready! #BTCto70k");
+}
+
+// Graceful shutdown
+async function shutdown(signal) {
+  log(MOD, `${signal} received, shutting down...`);
+
+  stopMonitor();
 
   try {
-    const order = await exchange.createMarketOrder(symbol, side, amount);
-    message.reply(
-      `✅ TRADE OK ID: ${order.id} | ${side} ${symbol} ${amount} filled ${order.filled || 0} @$${order.average || "mkt"} | ${order.status}`,
-    );
+    stopDiscordBot();
   } catch (e) {
-    message.reply(`❌ ${e.message}`);
+    error(MOD, "Discord shutdown error:", e.message);
   }
-});
 
-client.login(process.env.DISCORD_TOKEN);
+  try {
+    stopTelegramBot();
+  } catch (e) {
+    error(MOD, "Telegram shutdown error:", e.message);
+  }
+
+  log(MOD, "Shutdown complete");
+  process.exit(0);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+main().catch((e) => {
+  error(MOD, "Fatal:", e);
+  process.exit(1);
+});
