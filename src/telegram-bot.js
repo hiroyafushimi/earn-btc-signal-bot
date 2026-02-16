@@ -3,6 +3,7 @@ const { fetchPrice, executeTrade } = require("./exchange");
 const { onSignal, onDailySummary, getSignalStats, getRecentSignals } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
+const { checkLimit } = require("./rate-limit");
 
 const MOD = "Telegram";
 let bot;
@@ -20,12 +21,24 @@ async function startTelegramBot() {
     return null;
   }
 
-  const channelId = process.env.TELEGRAM_CHANNEL_ID;
-  adminIds = process.env.ADMIN_TELEGRAM_IDS
-    ? process.env.ADMIN_TELEGRAM_IDS.split(",").map((id) => id.trim())
-    : null;
+  const rawChannelId = (process.env.TELEGRAM_CHANNEL_ID || "").trim();
+  const channelId = rawChannelId && !/^your_/.test(rawChannelId) ? rawChannelId : null;
+  if (!channelId) {
+    log(MOD, "TELEGRAM_CHANNEL_ID not set, signal broadcast disabled");
+  }
+  const parsedAdminIds = (process.env.ADMIN_TELEGRAM_IDS || "").trim()
+    .split(",").map((id) => id.trim()).filter(Boolean);
+  adminIds = parsedAdminIds.length > 0 ? parsedAdminIds : null;
 
   bot = new Bot(token);
+
+  // Rate limit middleware
+  bot.use(async (ctx, next) => {
+    if (ctx.from && !checkLimit("telegram", ctx.from.id)) {
+      return ctx.reply("⏳ レート制限中です。しばらくお待ちください。");
+    }
+    await next();
+  });
 
   // /start
   bot.command("start", async (ctx) => {

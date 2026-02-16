@@ -3,6 +3,7 @@ const { executeTrade, fetchPrice } = require("./exchange");
 const { onSignal, onDailySummary, getSignalStats, getRecentSignals } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
+const { checkLimit } = require("./rate-limit");
 
 const MOD = "Discord";
 let client;
@@ -15,16 +16,20 @@ function isAdmin(userId) {
 }
 
 async function startDiscordBot() {
-  const token = process.env.DISCORD_TOKEN;
-  if (!token) {
-    log(MOD, "DISCORD_TOKEN not set, skipping");
+  const token = (process.env.DISCORD_TOKEN || "").trim();
+  if (!token || /^your_/.test(token)) {
+    log(MOD, "DISCORD_TOKEN not set or placeholder, skipping");
     return null;
   }
 
-  signalChannelId = process.env.DISCORD_SIGNAL_CHANNEL_ID;
-  adminIds = process.env.ADMIN_DISCORD_IDS
-    ? process.env.ADMIN_DISCORD_IDS.split(",").map((id) => id.trim())
-    : null;
+  const rawChannelId = (process.env.DISCORD_SIGNAL_CHANNEL_ID || "").trim();
+  signalChannelId = rawChannelId && !/^your_/.test(rawChannelId) ? rawChannelId : null;
+  if (!signalChannelId) {
+    log(MOD, "DISCORD_SIGNAL_CHANNEL_ID not set, signal broadcast disabled");
+  }
+  const parsedAdminIds = (process.env.ADMIN_DISCORD_IDS || "").trim()
+    .split(",").map((id) => id.trim()).filter(Boolean);
+  adminIds = parsedAdminIds.length > 0 ? parsedAdminIds : null;
 
   client = new Client({
     intents: [
@@ -44,13 +49,17 @@ async function startDiscordBot() {
     const content = message.content.toLowerCase();
     log(MOD, `${message.author.username}: ${message.content}`);
 
+    if (!checkLimit("discord", message.author.id)) {
+      return message.reply("⏳ レート制限中です。しばらくお待ちください。");
+    }
+
     // !ping
-    if (message.content === "!ping") {
+    if (content === "!ping") {
       return message.reply("pong #BTCto70k");
     }
 
     // !price
-    if (message.content === "!price") {
+    if (content === "!price") {
       try {
         const p = await fetchPrice("BTC/USDT");
         return message.reply(
@@ -62,7 +71,7 @@ async function startDiscordBot() {
     }
 
     // !status
-    if (message.content === "!status") {
+    if (content === "!status") {
       const stats = getSignalStats();
       const lastAt = stats.lastSignalAt
         ? new Date(stats.lastSignalAt).toLocaleString("ja-JP")
@@ -81,7 +90,7 @@ async function startDiscordBot() {
     }
 
     // !history
-    if (message.content === "!history") {
+    if (content === "!history") {
       const recent = getRecentSignals(5);
       if (recent.length === 0) {
         return message.reply("シグナル履歴なし");
@@ -96,7 +105,7 @@ async function startDiscordBot() {
     }
 
     // !subscribe
-    if (message.content === "!subscribe") {
+    if (content === "!subscribe") {
       if (!stripeEnabled()) {
         return message.reply("サブスクリプション: $5/月\n決済連携は準備中です。");
       }

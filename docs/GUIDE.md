@@ -42,6 +42,7 @@ index.js (Express /health + graceful shutdown)
 | `src/discord-bot.js` | Discord Bot (!trade, !price, !status, !history, !subscribe) + シグナル/サマリー自動配信 |
 | `src/telegram-bot.js` | Telegram Bot (/price, /status, /history, /subscribe) + シグナル/サマリー自動配信 |
 | `src/subscription.js` | Stripe Checkout Session 生成 + Webhook 処理 + ユーザー管理 (JSON) |
+| `src/rate-limit.js` | コマンドレート制限 (ユーザー単位、Window/Max 設定可) |
 
 ## 運用機能
 
@@ -68,7 +69,7 @@ index.js (Express /health + graceful shutdown)
 
 ### グレースフルシャットダウン (index.js)
 
-- SIGINT/SIGTERM でシグナル監視停止 → 両Bot切断 → プロセス終了
+- SIGINT/SIGTERM でシグナル監視停止 → レート制限タイマー停止 → 両Bot切断 → Express サーバー停止 → プロセス終了
 
 ### トレード権限制限
 
@@ -93,7 +94,7 @@ index.js (Express /health + graceful shutdown)
 | `!status` | Bot ステータス (uptime, シグナル数, 最終シグナル) |
 | `!history` | 直近シグナル一覧 (最大5件) |
 | `!subscribe` | サブスク登録 ($5/月 Stripe) |
-| `!trade buy/sell` | BTC トレード実行 |
+| `!trade buy/sell` | BTC トレード実行 (管理者のみ) |
 
 ### Telegram
 
@@ -119,6 +120,14 @@ index.js (Express /health + graceful shutdown)
 ターゲット: $XX,XXX
 ストップロス: $XX,XXX
 リスク: X%
+強度: X/6
+
+根拠:
+  - RSI XX.X (売られすぎ)
+  - SMA ゴールデンクロス
+  - 1h足でも同方向
+
+YYYY-MM-DDTHH:MM:SS.sssZ
 ```
 
 ### 判定基準 (テクニカル指標ベース)
@@ -162,6 +171,8 @@ index.js (Express /health + graceful shutdown)
 | ADMIN_DISCORD_IDS | No | トレード許可 Discord ユーザー ID (カンマ区切り、空=全員許可) |
 | ADMIN_TELEGRAM_IDS | No | トレード許可 Telegram ユーザー ID (カンマ区切り、空=全員許可) |
 | PORT | No | Express ヘルスチェックポート (default: 3000) |
+| RATE_LIMIT_WINDOW | No | レート制限ウィンドウ ms (default: 60000) |
+| RATE_LIMIT_MAX | No | ウィンドウ内最大リクエスト数 (default: 10) |
 | STRIPE_SECRET_KEY | No | Stripe シークレットキー (未設定時は決済無効) |
 | STRIPE_WEBHOOK_SECRET | No | Stripe Webhook 署名検証シークレット |
 | SUBSCRIPTION_PRICE | No | 月額料金 USD (default: 5) |
@@ -222,11 +233,30 @@ Discord / Telegram はどちらか一方のトークンだけ設定すれば、�
 - [x] サブスクライバー数を !status / /status / /health に表示
 - [ ] 有料チャンネルのアクセス制御 (サブスク有無でシグナル制限)
 
-### Phase 4: 運用・スケール
+### Phase 4: 運用・スケール (完了)
 
-- [ ] デプロイ (VPS + PM2 / Docker)
-- [ ] エラー通知 (外部通知)
-- [ ] レート制限・abuse 対策
+- [x] PM2 デプロイ設定 (ecosystem.config.js)
+- [x] Docker デプロイ (Dockerfile + .dockerignore)
+- [x] コマンドレート制限 (rate-limit.js、ユーザー単位 Window/Max)
+- [ ] 外部エラー通知 (Slack/Discord Webhook)
+
+## デプロイ
+
+### PM2
+
+```bash
+npm i -g pm2
+pm2 start ecosystem.config.js
+pm2 save
+pm2 startup
+```
+
+### Docker
+
+```bash
+docker build -t btc-signal-bot .
+docker run -d --env-file .env -p 3000:3000 --name btc-signal-bot btc-signal-bot
+```
 
 ## 開発フロー
 

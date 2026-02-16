@@ -7,9 +7,11 @@ const { startMonitor, stopMonitor, getSignalStats } = require("./signal");
 const { startDiscordBot, stopDiscordBot } = require("./discord-bot");
 const { startTelegramBot, stopTelegramBot } = require("./telegram-bot");
 const { initStripe, handleWebhook, getSubscriberCount } = require("./subscription");
+const { stopCleanup: stopRateLimitCleanup } = require("./rate-limit");
 
 const MOD = "Main";
 const PORT = parseInt(process.env.PORT || "3000", 10);
+let server;
 
 async function main() {
   log(MOD, "btc-signal-bot starting... #BTCto70k");
@@ -91,7 +93,7 @@ async function main() {
     );
   });
 
-  app.listen(PORT, () => {
+  server = app.listen(PORT, () => {
     log(MOD, `Server: http://localhost:${PORT} (health, webhook, subscribe)`);
   });
 
@@ -103,6 +105,7 @@ async function shutdown(signal) {
   log(MOD, `${signal} received, shutting down...`);
 
   stopMonitor();
+  stopRateLimitCleanup();
 
   try {
     stopDiscordBot();
@@ -114,6 +117,12 @@ async function shutdown(signal) {
     stopTelegramBot();
   } catch (e) {
     error(MOD, "Telegram shutdown error:", e.message);
+  }
+
+  if (server) {
+    server.close(() => {
+      log(MOD, "Express server closed");
+    });
   }
 
   log(MOD, "Shutdown complete");

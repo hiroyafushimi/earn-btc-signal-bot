@@ -4,14 +4,15 @@ Discord + Telegram BTC シグナル配信ボット (#BTCto70k) -- サブスク $
 
 ## 概要
 
-BTC (Bitcoin) の価格シグナルを **Discord** と **Telegram** で配信するボット。
-Binance API でリアルタイム価格を監視し、売買シグナルを自動生成してサブスクライバーに配信する。
+BTC の価格シグナルを **Discord** と **Telegram** で配信するボット。
+Binance API でリアルタイム価格を監視し、テクニカル指標 (SMA, RSI) に基づく売買シグナルを自動生成してサブスクライバーに配信する。
 
-- **マルチプラットフォーム**: Discord + Telegram 両対応 (どちらか片方のみでも動作)
-- **シグナル配信**: BTC 価格の変動分析に基づく BUY/SELL シグナル
-- **トレード実行**: Discord/Telegram からコマンドで Binance 発注
-- **サブスクリプション**: $5/月 の有料シグナルサービス
-- **ハッシュタグ**: #BTCto70k
+- **マルチプラットフォーム**: Discord + Telegram 両対応 (片方のみでも動作)
+- **テクニカル分析**: SMA クロスオーバー + RSI + 複数時間足確認
+- **シグナル配信**: スコアリングに基づく BUY/SELL シグナル (根拠付き)
+- **トレード実行**: コマンドで Binance 発注 (管理者権限制限あり)
+- **サブスクリプション**: Stripe 連携で $5/月
+- **運用機能**: ヘルスチェック、ログ、リトライ、レート制限、PM2/Docker 対応
 
 ## 技術スタック
 
@@ -20,24 +21,30 @@ Binance API でリアルタイム価格を監視し、売買シグナルを自�
 | Node.js | ランタイム |
 | discord.js | Discord Bot |
 | grammy | Telegram Bot |
-| ccxt (Binance) | 価格データ取得・トレード実行 |
-| Express | Webhook / 決済エンドポイント |
-| dotenv | 環境変数管理 |
+| ccxt (Binance) | 価格データ・OHLCV 取得・トレード実行 |
+| Express | ヘルスチェック / Stripe Webhook |
+| Stripe | サブスクリプション決済 |
 
 ## ファイル構成
 
 ```
 src/
-  index.js          エントリポイント (両Bot起動)
-  exchange.js       Binance 接続 (ccxt)
-  signal.js         価格監視 + シグナル生成
+  index.js          エントリポイント (Express + graceful shutdown)
+  logger.js         タイムスタンプ付きロガー
+  exchange.js       Binance 接続 (ccxt + リトライ)
+  indicators.js     テクニカル分析 (SMA, RSI, クロスオーバー)
+  signal.js         価格監視 + シグナル生成 + 履歴保存
   discord-bot.js    Discord Bot
   telegram-bot.js   Telegram Bot
+  subscription.js   Stripe 決済 + ユーザー管理
+  rate-limit.js     コマンドレート制限
 config/
   .env.example      環境変数テンプレート
-docs/
-  GUIDE.md          開発ガイド・仕様書
-  USAGE.md          利用ガイド
+data/               (自動生成, gitignore)
+  signals.json      シグナル履歴
+  subscribers.json  サブスクライバー情報
+ecosystem.config.js PM2 設定
+Dockerfile          Docker デプロイ用
 ```
 
 ## セットアップ
@@ -50,63 +57,62 @@ cd earn-btc-signal-bot
 npm i
 ```
 
-### 2. Discord Bot (任意)
-
-1. https://discord.com/developers/applications で Bot 作成
-2. Bot tab で Message Content Intent ON
-3. OAuth2 で bot scope + Send/Read 権限でサーバー招待
-4. トークンを `.env` に設定
-
-### 3. Telegram Bot (任意)
-
-1. [@BotFather](https://t.me/BotFather) で `/newbot` → トークン取得
-2. トークンを `.env` に設定
-
-### 4. Binance API
-
-1. [Binance Testnet](https://testnet.binance.vision) で API キー作成 (開発用)
-2. 本番は [Binance](https://www.binance.com) で API キー作成
-3. `.env` に設定
-
-### 5. 環境変数 (.env)
+### 2. 環境変数
 
 ```bash
 cp config/.env.example .env
-# .env を編集
 ```
+
+`.env` を編集:
 
 ```
 # Discord (任意)
-DISCORD_TOKEN=your_discord_bot_token
+DISCORD_TOKEN=your_token
 DISCORD_SIGNAL_CHANNEL_ID=your_channel_id
 
 # Telegram (任意)
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+TELEGRAM_BOT_TOKEN=123456:ABC-xxx
 TELEGRAM_CHANNEL_ID=your_channel_id
 
 # Binance
 EXCHANGE=binance
-API_KEY=your_api_key
-API_SECRET=your_api_secret
+API_KEY=your_key
+API_SECRET=your_secret
 SANDBOX=true
 
-# Trade
-PROCESSING_AMOUNT=0.001
-RISK_PCT=0.01
+# Admin (カンマ区切り、空=全員トレード可能)
+ADMIN_DISCORD_IDS=
+ADMIN_TELEGRAM_IDS=
 
-# Signal
-SIGNAL_INTERVAL=60000
+# Stripe (任意)
+STRIPE_SECRET_KEY=sk_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+SUBSCRIPTION_PRICE=5
+BASE_URL=http://localhost:3000
 ```
 
-Discord / Telegram はどちらか一方のトークンのみ設定すれば、そのプラットフォームだけで動作する。
-
-### 6. 起動
+### 3. 起動
 
 ```bash
 npm start
 ```
 
-## 使い方
+### デプロイ (PM2)
+
+```bash
+npm i -g pm2
+pm2 start ecosystem.config.js
+pm2 save
+```
+
+### デプロイ (Docker)
+
+```bash
+docker build -t btc-signal-bot .
+docker run -d --env-file .env -p 3000:3000 btc-signal-bot
+```
+
+## コマンド
 
 ### Discord
 
@@ -114,31 +120,56 @@ npm start
 |----------|------|
 | `!ping` | 疎通確認 |
 | `!price` | BTC/USDT 現在価格 |
-| `!trade buy` | BTC 買い注文 |
-| `!trade sell` | BTC 売り注文 |
-| 🚀 / buy / 買い | 自動 BUY 検出 |
-| sell / 売り | 自動 SELL 検出 |
+| `!status` | Bot ステータス |
+| `!history` | 直近シグナル (5件) |
+| `!subscribe` | サブスク登録 ($5/月) |
+| `!trade buy/sell` | BTC トレード (管理者のみ) |
 
 ### Telegram
 
 | コマンド | 説明 |
 |----------|------|
-| `/start` | ウェルカムメッセージ |
+| `/start` | ウェルカム |
 | `/price` | BTC/USDT 現在価格 |
 | `/status` | Bot ステータス |
+| `/history` | 直近シグナル (5件) |
 | `/subscribe` | サブスク登録 ($5/月) |
 | `/help` | ヘルプ |
 
-## 収益モデル
+## シグナル
 
-| プラン | 価格 | 内容 |
-|--------|------|------|
-| Monthly | $5/月 | BTC シグナル全配信 (Discord + Telegram) |
+テクニカル指標 (SMA5/20 クロスオーバー, RSI14) + 1h 足確認のスコアリング判定。
+
+```
+#BTCto70k シグナル
+
+方向: BUY
+通貨: BTC/USDT
+価格: $68,302
+ターゲット: $70,351
+ストップロス: $66,936
+リスク: 1%
+強度: 4/6
+
+根拠:
+  - RSI 28.5 (売られすぎ)
+  - SMA ゴールデンクロス
+  - 1h足でも同方向
+```
+
+## API
+
+| エンドポイント | 説明 |
+|----------------|------|
+| `GET /health` | Bot ステータス JSON |
+| `POST /webhook/stripe` | Stripe Webhook |
 
 ## ドキュメント
 
 - [開発ガイド・仕様書](docs/GUIDE.md)
 - [利用ガイド](docs/USAGE.md)
+- [テスト手順書](docs/TESTING.md)
+- [運用マニュアル](docs/OPERATIONS.md)
 
 ## 警告
 
