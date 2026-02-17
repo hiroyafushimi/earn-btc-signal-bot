@@ -38,10 +38,14 @@ function getBaseCurrencyForSymbol(symbol) {
 }
 
 function formatPrice(value, symbol) {
+  if (value == null || isNaN(value)) return "--";
   const quote = symbol ? getQuoteCurrencyForSymbol(symbol) : getQuoteCurrency();
   if (quote === "JPY") {
     return `¥${Math.round(value).toLocaleString()}`;
   }
+  // Low-price coins (e.g. DOGE/USDT) need decimal places
+  if (value < 1) return `$${value.toFixed(6)}`;
+  if (value < 100) return `$${value.toFixed(4)}`;
   return `$${value.toLocaleString()}`;
 }
 
@@ -107,19 +111,35 @@ async function executeTrade(side, symbol = DEFAULT_SYMBOL, amount) {
       () => exchange.fetchBalance(),
       "fetchBalance",
     );
-    const quoteCurrency = getQuoteCurrency();
+    // Use the quote currency of the actual symbol being traded
+    const quoteCurrency = getQuoteCurrencyForSymbol(symbol);
     const quoteFree = balance.free[quoteCurrency] || 0;
+    if (quoteFree <= 0) {
+      throw new Error(`Insufficient ${quoteCurrency} balance: ${quoteFree}`);
+    }
     const ticker = await withRetry(
       () => exchange.fetchTicker(symbol),
       "fetchTicker",
     );
+    if (!ticker.last || ticker.last <= 0) {
+      throw new Error(`Invalid ticker price for ${symbol}: ${ticker.last}`);
+    }
     qty = (quoteFree * riskPct) / ticker.last;
   }
 
-  const order = await withRetry(
-    () => exchange.createMarketOrder(symbol, side, qty),
-    `createMarketOrder(${side})`,
-  );
+  if (qty <= 0 || isNaN(qty)) {
+    throw new Error(`Invalid trade quantity: ${qty}`);
+  }
+
+  // CRITICAL: Market orders must NOT be retried - a timeout doesn't mean
+  // the order wasn't placed. Retrying could cause duplicate orders.
+  let order;
+  try {
+    order = await exchange.createMarketOrder(symbol, side, qty);
+  } catch (e) {
+    error(MOD, `Trade FAILED: ${side} ${symbol} qty=${qty}: ${e.message}`);
+    throw e;
+  }
 
   log(MOD, `Trade OK: ${side} ${symbol} qty=${qty} filled=${order.filled}`);
 
@@ -129,7 +149,7 @@ async function executeTrade(side, symbol = DEFAULT_SYMBOL, amount) {
     symbol,
     qty,
     filled: order.filled || 0,
-    average: order.average || "mkt",
+    average: order.average || 0,
     status: order.status,
   };
 }

@@ -116,7 +116,7 @@ async function startTelegramBot() {
       [
         "Bot Status",
         `Uptime: ${uptimeFormatted()}`,
-        `Exchange: ${process.env.EXCHANGE || "binance"} (Sandbox: ${process.env.SANDBOX || "true"})`,
+        `Exchange: ${process.env.EXCHANGE || "bitbank"} (Sandbox: ${process.env.SANDBOX || "true"})`,
         `シグナル: BUY ${stats.totalBuy} / SELL ${stats.totalSell}`,
         `最終シグナル: ${lastAt}`,
         `履歴件数: ${stats.historyCount}`,
@@ -227,7 +227,7 @@ async function startTelegramBot() {
     try {
       const result = await executeTrade(side, undefined, amount);
       await ctx.reply(
-        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @${formatPrice(result.average)} | ${result.status}`,
+        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @${formatPrice(result.average, result.symbol)} | ${result.status}`,
       );
     } catch (e) {
       await ctx.reply(`❌ ${e.message}`);

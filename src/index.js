@@ -58,7 +58,7 @@ async function main() {
       startedAt: new Date(getStartedAt()).toISOString(),
       exchange: {
         connected: !!ex,
-        name: process.env.EXCHANGE || "binance",
+        name: process.env.EXCHANGE || "bitbank",
         sandbox: process.env.SANDBOX === "true",
       },
       signals: stats,
@@ -356,7 +356,7 @@ function drawChart(candles) {
     const price = maxP - range * i / 4;
     ctx.fillStyle = '#555';
     ctx.font = '10px monospace';
-    ctx.fillText(price.toFixed(price > 100 ? 0 : 4), 2, y + 3);
+    ctx.fillText(fmtPriceForSym(price, currentSymbol), 2, y + 3);
   }
 
   const barW = Math.max(1, (w - pad - 10) / candles.length - 1);
@@ -417,16 +417,28 @@ function drawChart(candles) {
   }
 }
 
+function fmtPriceForSym(v, sym) {
+  if (v == null || isNaN(v)) return '--';
+  const quote = (sym || '').split('/')[1] || 'USDT';
+  if (quote === 'JPY') return '\\u00a5' + Math.round(v).toLocaleString();
+  if (v < 1) return '$' + v.toFixed(6);
+  if (v < 100) return '$' + v.toFixed(4);
+  return '$' + v.toLocaleString();
+}
+
+function fmtPrice(v) {
+  return fmtPriceForSym(v, currentSymbol);
+}
+
 async function loadChart() {
   try {
     const res = await fetch('/api/chart?symbol=' + encodeURIComponent(currentSymbol) + '&timeframe=' + currentTF + '&limit=60');
     const data = await res.json();
     drawChart(data.candles);
     if (data.price) {
-      const fmt = data.price.last > 100 ? '$' + data.price.last.toLocaleString() : '$' + data.price.last.toFixed(4);
-      document.getElementById('price').textContent = fmt;
-      document.getElementById('high').textContent = '$' + data.price.high.toLocaleString();
-      document.getElementById('low').textContent = '$' + data.price.low.toLocaleString();
+      document.getElementById('price').textContent = fmtPrice(data.price.last);
+      document.getElementById('high').textContent = fmtPrice(data.price.high);
+      document.getElementById('low').textContent = fmtPrice(data.price.low);
       const base = currentSymbol.split('/')[0];
       document.getElementById('vol').textContent = (data.price.volume || 0).toFixed(2) + ' ' + base;
     }
@@ -446,7 +458,7 @@ async function loadPrices() {
       card.dataset.symbol = sym;
       card.onclick = () => switchSymbol(sym);
       const base = sym.split('/')[0];
-      const priceStr = p ? (p.last > 100 ? '$' + p.last.toLocaleString() : '$' + p.last.toFixed(4)) : '--';
+      const priceStr = p ? fmtPriceForSym(p.last, sym) : '--';
       card.innerHTML = '<div class="sym-name">' + base + '</div><div class="sym-price">' + priceStr + '</div>';
       grid.appendChild(card);
     }
@@ -467,7 +479,7 @@ async function loadSignals() {
     list.innerHTML = data.signals.reverse().map(s => {
       const t = new Date(s.timestamp).toLocaleString('ja-JP', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
       const base = (s.symbol || 'BTC').split('/')[0];
-      const priceStr = s.price > 100 ? '$' + s.price.toLocaleString() : '$' + s.price.toFixed(4);
+      const priceStr = fmtPriceForSym(s.price, s.symbol || 'BTC/JPY');
       return '<div class="signal-item"><span class="side ' + s.side + '">' + s.side + '</span><span class="sym">' + base + '</span><span>' + priceStr + '</span><span>' + (s.strength||'-') + '/6</span><span>' + t + '</span></div>';
     }).join('');
   } catch (e) { console.error(e); }

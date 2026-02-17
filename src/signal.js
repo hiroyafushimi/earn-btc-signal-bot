@@ -25,6 +25,7 @@ let summaryListeners = [];
 let timeframeListeners = [];
 let timer = null;
 let dailyTimer = null;
+let saveLock = false;
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -46,6 +47,12 @@ function loadHistory() {
 
 function saveSignal(signal) {
   ensureDataDir();
+  // Simple lock to prevent concurrent writes from multiple symbols
+  if (saveLock) {
+    setTimeout(() => saveSignal(signal), 50);
+    return;
+  }
+  saveLock = true;
   try {
     const history = loadHistory();
     history.push(signal);
@@ -54,6 +61,8 @@ function saveSignal(signal) {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(trimmed, null, 2));
   } catch (e) {
     error(MOD, "Failed to save signal:", e.message);
+  } finally {
+    saveLock = false;
   }
 }
 
@@ -170,12 +179,20 @@ function analyze(priceObjs, symbol) {
   const current = prices[prices.length - 1];
   const isBuy = result.side === "BUY";
 
+  // Use appropriate precision: round to integer for high-price (JPY, BTC),
+  // keep decimals for low-price coins
+  const roundPrice = (v) => {
+    if (v >= 100) return Math.round(v);
+    if (v >= 1) return Math.round(v * 100) / 100;
+    return Math.round(v * 1000000) / 1000000;
+  };
+
   return {
     side: result.side,
     symbol: symbol,
     price: current,
-    target: Math.round(current * (isBuy ? 1.03 : 0.97)),
-    stopLoss: Math.round(current * (isBuy ? 0.98 : 1.02)),
+    target: roundPrice(current * (isBuy ? 1.03 : 0.97)),
+    stopLoss: roundPrice(current * (isBuy ? 0.98 : 1.02)),
     riskPct: 1,
     strength: result.strength,
     reasons: result.reasons,
