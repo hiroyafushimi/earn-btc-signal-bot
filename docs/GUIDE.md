@@ -36,12 +36,12 @@ index.js (Express /health + graceful shutdown)
 |----------|------|
 | `src/index.js` | エントリポイント。Exchange/Stripe 初期化 → Bot起動 → シグナル監視 → Express (health, webhook, subscribe) → graceful shutdown |
 | `src/logger.js` | タイムスタンプ付き統一ロガー + uptime 管理 |
-| `src/exchange.js` | ccxt 取引所接続 (bitbank/Binance等)。価格取得・OHLCV取得・トレード実行・マルチシンボル管理 (最大3回リトライ + 指数バックオフ) |
+| `src/exchange.js` | ccxt 取引所接続 (bitbank/Binance等)。価格取得・OHLCV取得・トレード実行・マルチシンボル管理・コイン別取引量・シンボル名解決 (最大3回リトライ + 指数バックオフ) |
 | `src/indicators.js` | テクニカル分析指標 (SMA, RSI, SMAクロスオーバー, 総合スコア判定) |
-| `src/signal.js` | マルチ通貨ペア価格監視 → 指標分析 → 複数時間足確認 → シグナル生成 → クールダウン → 履歴保存 → 日次サマリー |
+| `src/signal.js` | マルチ通貨ペア価格監視 → 指標分析 → 複数時間足確認 → シグナル生成 → 自動トレード → クールダウン → 履歴保存 → 日次サマリー |
 | `src/tui.js` | TUI ダッシュボード (blessed-contrib)。リアルタイムチャート・SMA・RSI・シグナル履歴・ログ表示。タイムフレーム/シンボル切替 |
-| `src/discord-bot.js` | Discord Bot (!trade, !price, !status, !history, !subscribe) + シグナル/サマリー自動配信 |
-| `src/telegram-bot.js` | Telegram Bot (/price, /status, /history, /subscribe) + シグナル/サマリー自動配信 |
+| `src/discord-bot.js` | Discord Bot (!trade [通貨] [数量], !price, !prices, !status, !history, !subscribe) + キーワード検出 + シグナル/サマリー自動配信 |
+| `src/telegram-bot.js` | Telegram Bot (/trade, /price, /prices, /status, /history, /subscribe) + キーワード検出 + シグナル/サマリー自動配信 |
 | `src/subscription.js` | Stripe Checkout Session 生成 + Webhook 処理 + ユーザー管理 (JSON) |
 | `src/rate-limit.js` | コマンドレート制限 (ユーザー単位、Window/Max 設定可) |
 
@@ -91,20 +91,25 @@ index.js (Express /health + graceful shutdown)
 | コマンド | 説明 |
 |----------|------|
 | `!ping` | 疎通確認 |
-| `!price` | BTC 現在価格 (TRADE_SYMBOL に応じた通貨ペア) |
+| `!price [通貨]` | 価格表示 (例: `!price ETH`) |
+| `!prices` | 全通貨の価格一覧 |
 | `!status` | Bot ステータス (uptime, シグナル数, 最終シグナル) |
 | `!history` | 直近シグナル一覧 (最大5件) |
+| `!timeframe [tf]` | タイムフレーム変更 (例: `!timeframe 1h`) |
 | `!subscribe` | サブスク登録 ($5/月 Stripe) |
-| `!trade buy/sell` | BTC トレード実行 (管理者のみ) |
+| `!trade buy/sell [通貨] [数量]` | トレード実行 (管理者のみ、例: `!trade buy ETH 0.5`) |
 
 ### Telegram
 
 | コマンド | 説明 |
 |----------|------|
 | `/start` | ウェルカムメッセージ |
-| `/price` | BTC 現在価格 (TRADE_SYMBOL に応じた通貨ペア) |
+| `/price [通貨]` | 価格表示 (例: `/price ETH`) |
+| `/prices` | 全通貨の価格一覧 |
+| `/trade buy/sell [通貨] [数量]` | トレード実行 (管理者のみ、例: `/trade buy ETH 0.5`) |
 | `/status` | Bot ステータス (uptime, シグナル数, 最終シグナル) |
 | `/history` | 直近シグナル一覧 (最大5件) |
+| `/timeframe [tf]` | タイムフレーム変更 (例: `/timeframe 1h`) |
 | `/subscribe` | サブスク登録 ($5/月) |
 | `/help` | ヘルプ |
 
@@ -113,23 +118,27 @@ index.js (Express /health + graceful shutdown)
 ### 配信フォーマット
 
 ```
-#BTCSignal シグナル
+#ETHSignal シグナル
 
 方向: BUY
-通貨: BTC/JPY
-価格: ¥X,XXX,XXX
-ターゲット: ¥X,XXX,XXX
-ストップロス: ¥X,XXX,XXX
-リスク: X%
-強度: X/6
+通貨: ETH/JPY
+価格: ¥450,000
+ターゲット: ¥463,500
+ストップロス: ¥441,000
+リスク: 1%
+強度: 5/6
 
 根拠:
-  - RSI XX.X (売られすぎ)
+  - RSI 28.5 (売られすぎ)
   - SMA ゴールデンクロス
   - 1h足でも同方向
 
-YYYY-MM-DDTHH:MM:SS.sssZ
+自動トレード: 約定 0.05 @¥450,100
+
+2026-02-17T12:00:00.000Z
 ```
+
+`自動トレード` 行は `AUTO_TRADE=true` の場合のみ表示される。
 
 ### 判定基準 (テクニカル指標ベース)
 
@@ -167,8 +176,12 @@ YYYY-MM-DDTHH:MM:SS.sssZ
 | API_KEY | Yes | 取引所 API キー |
 | API_SECRET | Yes | 取引所 API シークレット |
 | SANDBOX | No | true でテストネット (default: true) |
-| PROCESSING_AMOUNT | No | 固定取引量 BTC (default: 0.001) |
+| PROCESSING_AMOUNT | No | デフォルト取引量 (default: 0.001) |
+| PROCESSING_AMOUNT_{COIN} | No | コイン別取引量 (例: PROCESSING_AMOUNT_ETH=0.05, PROCESSING_AMOUNT_XRP=100) |
 | RISK_PCT | No | 残高に対するリスク割合 (default: 0.01) |
+| AUTO_TRADE | No | 自動トレード有効化 (default: false) |
+| AUTO_TRADE_MIN_STRENGTH | No | 自動トレード最低シグナル強度 (default: 4、1-6) |
+| AUTO_TRADE_SYMBOLS | No | 自動トレード対象コイン (カンマ区切り、例: ETH,XRP,SOL。空=全通貨) |
 | SIGNAL_INTERVAL | No | シグナルチェック間隔 ms (default: 60000) |
 | SIGNAL_COOLDOWN | No | 同方向シグナル最小間隔 ms (default: 300000) |
 | SIGNAL_TIMEFRAME | No | デフォルトタイムフレーム (default: 5m。TUIで変更可) |
@@ -237,6 +250,16 @@ Discord / Telegram はどちらか一方のトークンだけ設定すれば、�
 - [x] JPY / USD 通貨フォーマット自動判定
 - [x] シンボルバリデーション (不正値フォールバック)
 - [ ] TUI トレードコマンド (B=buy, V=sell)
+
+### Phase 2.7: マルチコイントレード (完了)
+
+- [x] コイン別取引量設定 (PROCESSING_AMOUNT_ETH, PROCESSING_AMOUNT_XRP 等)
+- [x] トレードコマンドにシンボル指定 (!trade buy ETH 0.5, /trade sell XRP 100)
+- [x] resolveSymbol: 短縮名→フルシンボル自動解決 (ETH → ETH/JPY)
+- [x] テキストからコイン名自動検出 ("ETH 買い" → ETH/JPY で取引)
+- [x] シグナルベース自動トレード (AUTO_TRADE, 強度閾値制御)
+- [x] 自動トレード対象コイン限定 (AUTO_TRADE_SYMBOLS)
+- [x] 自動トレード結果をシグナル通知・履歴に記録
 
 ### Phase 3: サブスクリプション $5/月 (完了)
 

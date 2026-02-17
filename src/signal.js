@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { fetchPrice, fetchOHLCV, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol } = require("./exchange");
+const { fetchPrice, fetchOHLCV, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol, executeTrade, getTradeAmount } = require("./exchange");
 const { log, error } = require("./logger");
 const { analyzeIndicators, sma, rsi } = require("./indicators");
 
@@ -13,6 +13,17 @@ const DAILY_INTERVAL = 24 * 60 * 60 * 1000;
 
 const VALID_TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"];
 let currentTimeframe = process.env.SIGNAL_TIMEFRAME || "5m";
+
+// Auto-trade: execute trades automatically when signals meet strength threshold
+// AUTO_TRADE=true enables, AUTO_TRADE_MIN_STRENGTH=4 sets minimum strength (1-6)
+// AUTO_TRADE_SYMBOLS=ETH,XRP limits auto-trade to specific coins (empty = all monitored)
+const AUTO_TRADE = process.env.AUTO_TRADE === "true";
+const AUTO_TRADE_MIN_STRENGTH = parseInt(process.env.AUTO_TRADE_MIN_STRENGTH || "4", 10);
+const AUTO_TRADE_SYMBOLS = (() => {
+  const raw = (process.env.AUTO_TRADE_SYMBOLS || "").trim();
+  if (!raw) return null; // null = all symbols
+  return raw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+})();
 
 // Per-symbol state
 let priceHistories = {};  // { "BTC/USDT": [...], "ETH/USDT": [...] }
@@ -165,6 +176,12 @@ function formatSignal(signal) {
     }
   }
 
+  if (signal.autoTraded && signal.tradeResult) {
+    lines.push(``, `自動トレード: 約定 ${signal.tradeResult.filled} @${formatPrice(signal.tradeResult.average, signal.symbol)}`);
+  } else if (signal.autoTraded === false && signal.tradeError) {
+    lines.push(``, `自動トレード失敗: ${signal.tradeError}`);
+  }
+
   lines.push(``, `${new Date(signal.timestamp).toISOString()}`);
   return lines.join("\n");
 }
@@ -207,17 +224,40 @@ function isCooldownActive(symbol, side) {
   return Date.now() - last < COOLDOWN;
 }
 
-async function emitSignal(signal) {
-  const message = formatSignal(signal);
-  log(MOD, `Signal: ${signal.symbol} ${signal.side} @${formatPrice(signal.price, signal.symbol)}`);
+function isAutoTradeTarget(symbol) {
+  if (!AUTO_TRADE_SYMBOLS) return true; // all symbols
+  const base = getBaseCurrencyForSymbol(symbol);
+  return AUTO_TRADE_SYMBOLS.includes(base);
+}
 
+async function emitSignal(signal) {
   const key = `${signal.symbol}:${signal.side}`;
   lastSignalTime[key] = Date.now();
   lastSignalAt = Date.now();
   signalCount[signal.side.toLowerCase()] =
     (signalCount[signal.side.toLowerCase()] || 0) + 1;
 
+  // Auto-trade execution (before save/format so results are included)
+  if (AUTO_TRADE && signal.strength >= AUTO_TRADE_MIN_STRENGTH && isAutoTradeTarget(signal.symbol)) {
+    try {
+      const side = signal.side.toLowerCase();
+      const amount = getTradeAmount(signal.symbol);
+      log(MOD, `Auto-trade: ${side} ${signal.symbol} qty=${amount} (strength=${signal.strength})`);
+      const result = await executeTrade(side, signal.symbol, amount);
+      log(MOD, `Auto-trade OK: ${result.side} ${result.symbol} filled=${result.filled} @${result.average}`);
+      signal.autoTraded = true;
+      signal.tradeResult = { id: result.id, filled: result.filled, average: result.average };
+    } catch (e) {
+      error(MOD, `Auto-trade FAILED: ${signal.symbol} ${signal.side}: ${e.message}`);
+      signal.autoTraded = false;
+      signal.tradeError = e.message;
+    }
+  }
+
   saveSignal(signal);
+
+  const message = formatSignal(signal);
+  log(MOD, `Signal: ${signal.symbol} ${signal.side} @${formatPrice(signal.price, signal.symbol)}`);
 
   for (const cb of signalListeners) {
     try {
@@ -339,6 +379,10 @@ async function emitDailySummary() {
 function startMonitor() {
   const symbols = getSymbols();
   log(MOD, `Monitor started: ${symbols.length} symbols [${symbols.join(", ")}] (interval: ${INTERVAL}ms, cooldown: ${COOLDOWN}ms)`);
+  if (AUTO_TRADE) {
+    const targets = AUTO_TRADE_SYMBOLS ? AUTO_TRADE_SYMBOLS.join(",") : "ALL";
+    log(MOD, `Auto-trade ENABLED: min_strength=${AUTO_TRADE_MIN_STRENGTH}, targets=${targets}`);
+  }
   tick();
   timer = setInterval(tick, INTERVAL);
 

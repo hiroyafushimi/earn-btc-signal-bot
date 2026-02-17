@@ -1,5 +1,5 @@
 const { Client, Events, GatewayIntentBits } = require("discord.js");
-const { executeTrade, fetchPrice, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol } = require("./exchange");
+const { executeTrade, fetchPrice, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol, resolveSymbol, getTradeAmount } = require("./exchange");
 const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes, getActiveSymbols } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
@@ -168,21 +168,32 @@ async function startDiscordBot() {
       }
     }
 
-    // Trade detection
-    let side, amount;
-    const fixedAmount = parseFloat(process.env.PROCESSING_AMOUNT || "0.001");
+    // Trade detection: !trade buy [symbol] [amount] or !trade sell ETH 0.5
+    let side, tradeSymbol, amount;
 
-    const cmdMatch = content.match(/!trade\s+(buy|sell)/i);
+    const cmdMatch = content.match(/!trade\s+(buy|sell)(?:\s+([a-z][a-z0-9/]*)\s*([\d.]+)?|\s+([\d.]+))?/i);
     if (cmdMatch) {
       side = cmdMatch[1].toLowerCase();
-      amount = fixedAmount;
+      if (cmdMatch[2]) tradeSymbol = resolveSymbol(cmdMatch[2]);
+      if (cmdMatch[3]) amount = parseFloat(cmdMatch[3]);
+      if (cmdMatch[4]) amount = parseFloat(cmdMatch[4]);
     } else {
       if (/(?:🚀|buy|long|入|買い)/.test(content)) {
         side = "buy";
       } else if (/(?:sell|short|出|売り)/.test(content)) {
         side = "sell";
       }
-      if (side) amount = fixedAmount;
+      // Try to detect coin name from message (e.g. "buy ETH", "ETH 買い")
+      if (side) {
+        const symbols = getSymbols();
+        for (const s of symbols) {
+          const base = s.split("/")[0].toLowerCase();
+          if (content.includes(base)) {
+            tradeSymbol = s;
+            break;
+          }
+        }
+      }
     }
 
     if (!side) return;
@@ -191,8 +202,11 @@ async function startDiscordBot() {
       return message.reply("⛔ トレード権限がありません");
     }
 
+    const sym = tradeSymbol || getDefaultSymbol();
+    const qty = amount || getTradeAmount(sym);
+
     try {
-      const result = await executeTrade(side, undefined, amount);
+      const result = await executeTrade(side, sym, qty);
       message.reply(
         `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @${formatPrice(result.average, result.symbol)} | ${result.status}`,
       );
