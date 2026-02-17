@@ -46,7 +46,6 @@ function startTUI() {
     xPadding: 5,
     showLegend: true,
     wholeNumbersOnly: false,
-    abbreviate: true,
   });
 
   // Status info (top-right)
@@ -135,9 +134,9 @@ function startTUI() {
   });
 
   // S key cycles through symbols
-  screen.key(["s"], () => {
+  screen.key(["s", "S"], () => {
     if (symbols.length <= 1) {
-      addLog("Symbol switching requires TRADE_SYMBOLS in .env (e.g. BTC/JPY,ETH/JPY,XRP/JPY)");
+      addLog("1銘柄のみ。.envにTRADE_SYMBOLS=BTC/JPY,ETH/JPY,XRP/JPYを設定して再起動");
       return;
     }
     currentSymbolIdx = (currentSymbolIdx + 1) % symbols.length;
@@ -194,10 +193,22 @@ async function refreshChart() {
       sma20Data.push(sma(slice, 20) || closes[i]);
     }
 
+    // Normalize prices: blessed-contrib Y-axis starts at 0, so JPY prices (~10M)
+    // get compressed into a thin line at the top. Subtract baseline for readability.
+    const allValues = [...closes, ...sma5Data, ...sma20Data];
+    const minVal = Math.min(...allValues);
+    const normCloses = closes.map((c) => c - minVal);
+    const normSma5 = sma5Data.map((c) => c - minVal);
+    const normSma20 = sma20Data.map((c) => c - minVal);
+
+    // Show current price in chart label
+    const currentPrice = closes[closes.length - 1];
+    chart.setLabel(` ${sym} ${formatPrice(currentPrice, sym)} [${tf}] `);
+
     chart.setData([
-      { title: "Price", x: labels, y: closes, style: { line: "yellow" } },
-      { title: "SMA5", x: labels, y: sma5Data, style: { line: "cyan" } },
-      { title: "SMA20", x: labels, y: sma20Data, style: { line: "magenta" } },
+      { title: "Price", x: labels, y: normCloses, style: { line: "yellow" } },
+      { title: "SMA5", x: labels, y: normSma5, style: { line: "cyan" } },
+      { title: "SMA20", x: labels, y: normSma20, style: { line: "magenta" } },
     ]);
   } catch (e) {
     addLog(`Chart error: ${e.message}`);
