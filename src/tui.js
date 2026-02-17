@@ -140,7 +140,7 @@ function startTUI() {
     const sym = symbols[currentSymbolIdx];
     chart.setLabel(` ${sym} Chart [${getTimeframe()}] `);
     addLog(`Symbol: ${sym}`);
-    refreshChart();
+    refreshAll();
   });
 
   // Listen for timeframe changes
