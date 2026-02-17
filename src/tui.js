@@ -17,7 +17,24 @@ function addLog(msg) {
   const ts = new Date().toLocaleTimeString("ja-JP", { hour12: false });
   logLines.push(`[${ts}] ${msg}`);
   if (logLines.length > 100) logLines = logLines.slice(-100);
-  if (logBox) {
+  renderLog();
+}
+
+// Replace last log line matching prefix, or add new
+function replaceLog(prefix, msg) {
+  const ts = new Date().toLocaleTimeString("ja-JP", { hour12: false });
+  const idx = logLines.findLastIndex((l) => l.includes(prefix));
+  const line = `[${ts}] ${msg}`;
+  if (idx >= 0) {
+    logLines[idx] = line;
+  } else {
+    logLines.push(line);
+  }
+  renderLog();
+}
+
+function renderLog() {
+  if (logBox && screen) {
     logBox.setContent(logLines.slice(-logBox.height + 2).join("\n"));
     screen.render();
   }
@@ -115,9 +132,9 @@ function startTUI() {
     screen.key([String(i + 1)], () => {
       const result = setTimeframe(tfs[idx]);
       if (result.ok) {
-        addLog(`Timeframe: ${result.prev} -> ${result.current}`);
+        replaceLog("TF:", `TF: ${result.current}`);
       } else {
-        addLog(result.error);
+        replaceLog("TF:", result.error);
       }
     });
   }
@@ -129,7 +146,7 @@ function startTUI() {
     const next = tfs[(idx + 1) % tfs.length];
     const result = setTimeframe(next);
     if (result.ok) {
-      addLog(`Timeframe: ${result.prev} -> ${result.current}`);
+      replaceLog("TF:", `TF: ${result.current}`);
     }
   });
 
