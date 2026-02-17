@@ -118,12 +118,34 @@ async function fetchPrice(symbol = DEFAULT_SYMBOL) {
   }, `fetchPrice(${symbol})`);
 }
 
+// Per-symbol trade amount: PROCESSING_AMOUNT_BTC=0.001, PROCESSING_AMOUNT_ETH=0.05, etc.
+// Falls back to PROCESSING_AMOUNT (global default)
+function getTradeAmount(symbol) {
+  const base = getBaseCurrencyForSymbol(symbol);
+  const perCoin = process.env[`PROCESSING_AMOUNT_${base}`];
+  if (perCoin) {
+    const parsed = parseFloat(perCoin);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return parseFloat(process.env.PROCESSING_AMOUNT || "0.001");
+}
+
+// Resolve symbol from short name (e.g. "ETH" -> "ETH/JPY")
+function resolveSymbol(input) {
+  if (!input) return DEFAULT_SYMBOL;
+  const upper = input.toUpperCase().trim();
+  // Already a full symbol
+  if (SYMBOLS.includes(upper)) return upper;
+  // Short name match (e.g. "ETH" -> "ETH/JPY")
+  const match = SYMBOLS.find((s) => s.startsWith(upper + "/"));
+  return match || DEFAULT_SYMBOL;
+}
+
 async function executeTrade(side, symbol = DEFAULT_SYMBOL, amount) {
   if (!exchange) throw new Error("Exchange not ready");
 
   const riskPct = parseFloat(process.env.RISK_PCT || "0");
-  const fixedAmount =
-    amount || parseFloat(process.env.PROCESSING_AMOUNT || "0.001");
+  const fixedAmount = amount || getTradeAmount(symbol);
 
   let qty = fixedAmount;
 
@@ -190,4 +212,4 @@ async function fetchOHLCV(symbol = DEFAULT_SYMBOL, timeframe = "1h", limit = 50)
   }, `fetchOHLCV(${symbol},${timeframe})`);
 }
 
-module.exports = { initExchange, getExchange, fetchPrice, fetchOHLCV, executeTrade, getDefaultSymbol, getSymbols, getQuoteCurrency, getQuoteCurrencyForSymbol, getBaseCurrencyForSymbol, formatPrice };
+module.exports = { initExchange, getExchange, fetchPrice, fetchOHLCV, executeTrade, getDefaultSymbol, getSymbols, getQuoteCurrency, getQuoteCurrencyForSymbol, getBaseCurrencyForSymbol, formatPrice, resolveSymbol, getTradeAmount };
