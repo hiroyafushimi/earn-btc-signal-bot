@@ -5,25 +5,25 @@
 | 項目 | 内容 |
 |------|------|
 | プロジェクト名 | btc-signal-bot |
-| 目的 | Discord + Telegram で BTC シグナル配信 (#BTCto70k) |
+| 目的 | 仮想通貨シグナル配信 (マルチ通貨ペア対応) |
 | 収益 | サブスク $5/月 |
-| スタック | Node.js / discord.js / grammy / ccxt / Express |
+| スタック | Node.js / discord.js / grammy / ccxt / blessed-contrib / Express |
 
 ## アーキテクチャ
 
 ```
-Binance API (価格データ)
+取引所 API (bitbank/Binance等 via ccxt)
     ↓
-exchange.js (ccxt 接続 + リトライ)
+exchange.js (ccxt 接続 + リトライ + マルチシンボル)
     ↓
 signal.js (分析・シグナル生成・クールダウン・履歴保存)
     ↓
-┌───────────────┬────────────────┐
-│ discord-bot.js │ telegram-bot.js │
-│ (Discord 配信)  │ (Telegram 配信)  │
-└───────────────┴────────────────┘
-    ↓                 ↓
-Discord チャンネル  Telegram チャンネル
+┌───────────────┬────────────────┬──────────┐
+│ discord-bot.js │ telegram-bot.js │ tui.js   │
+│ (Discord 配信)  │ (Telegram 配信)  │ (TUI)    │
+└───────────────┴────────────────┴──────────┘
+    ↓                 ↓                ↓
+Discord チャンネル  Telegram チャンネル  ターミナル
     ↓                 ↓
 サブスクライバー (有料ユーザー)
 
@@ -34,11 +34,12 @@ index.js (Express /health + graceful shutdown)
 
 | ファイル | 役割 |
 |----------|------|
-| `src/index.js` | エントリポイント。Exchange/Stripe 初期化 → 両Bot起動 → シグナル監視 → Express (health, webhook, subscribe) → graceful shutdown |
+| `src/index.js` | エントリポイント。Exchange/Stripe 初期化 → Bot起動 → シグナル監視 → Express (health, webhook, subscribe) → graceful shutdown |
 | `src/logger.js` | タイムスタンプ付き統一ロガー + uptime 管理 |
-| `src/exchange.js` | ccxt Binance 接続。価格取得・OHLCV取得・トレード実行 (最大3回リトライ + 指数バックオフ) |
+| `src/exchange.js` | ccxt 取引所接続 (bitbank/Binance等)。価格取得・OHLCV取得・トレード実行・マルチシンボル管理 (最大3回リトライ + 指数バックオフ) |
 | `src/indicators.js` | テクニカル分析指標 (SMA, RSI, SMAクロスオーバー, 総合スコア判定) |
-| `src/signal.js` | BTC 価格定期監視 → 指標分析 → 複数時間足確認 → シグナル生成 → クールダウン → 履歴保存 → 日次サマリー |
+| `src/signal.js` | マルチ通貨ペア価格監視 → 指標分析 → 複数時間足確認 → シグナル生成 → クールダウン → 履歴保存 → 日次サマリー |
+| `src/tui.js` | TUI ダッシュボード (blessed-contrib)。リアルタイムチャート・SMA・RSI・シグナル履歴・ログ表示。タイムフレーム/シンボル切替 |
 | `src/discord-bot.js` | Discord Bot (!trade, !price, !status, !history, !subscribe) + シグナル/サマリー自動配信 |
 | `src/telegram-bot.js` | Telegram Bot (/price, /status, /history, /subscribe) + シグナル/サマリー自動配信 |
 | `src/subscription.js` | Stripe Checkout Session 生成 + Webhook 処理 + ユーザー管理 (JSON) |
@@ -112,13 +113,13 @@ index.js (Express /health + graceful shutdown)
 ### 配信フォーマット
 
 ```
-#BTCto70k シグナル
+#BTCSignal シグナル
 
 方向: BUY
 通貨: BTC/JPY
 価格: ¥X,XXX,XXX
-ターゲット: $XX,XXX
-ストップロス: $XX,XXX
+ターゲット: ¥X,XXX,XXX
+ストップロス: ¥X,XXX,XXX
 リスク: X%
 強度: X/6
 
@@ -160,15 +161,17 @@ YYYY-MM-DDTHH:MM:SS.sssZ
 | DISCORD_SIGNAL_CHANNEL_ID | No | Discord シグナル配信チャンネル ID |
 | TELEGRAM_BOT_TOKEN | No | Telegram Bot トークン (設定時のみTelegram有効) |
 | TELEGRAM_CHANNEL_ID | No | Telegram シグナル配信チャンネル ID |
-| EXCHANGE | Yes | 取引所 (binance) |
-| TRADE_SYMBOL | No | 取引通貨ペア (default: BTC/USDT、バイナンスジャパンは BTC/JPY) |
-| API_KEY | Yes | Binance API キー |
-| API_SECRET | Yes | Binance API シークレット |
+| EXCHANGE | Yes | 取引所 (default: bitbank。binance 等 ccxt 対応取引所) |
+| TRADE_SYMBOL | No | 取引通貨ペア (default: BTC/JPY) |
+| TRADE_SYMBOLS | No | マルチ通貨ペア (カンマ区切り。例: BTC/JPY,ETH/JPY,XRP/JPY) |
+| API_KEY | Yes | 取引所 API キー |
+| API_SECRET | Yes | 取引所 API シークレット |
 | SANDBOX | No | true でテストネット (default: true) |
 | PROCESSING_AMOUNT | No | 固定取引量 BTC (default: 0.001) |
 | RISK_PCT | No | 残高に対するリスク割合 (default: 0.01) |
 | SIGNAL_INTERVAL | No | シグナルチェック間隔 ms (default: 60000) |
 | SIGNAL_COOLDOWN | No | 同方向シグナル最小間隔 ms (default: 300000) |
+| SIGNAL_TIMEFRAME | No | デフォルトタイムフレーム (default: 5m。TUIで変更可) |
 | ADMIN_DISCORD_IDS | No | トレード許可 Discord ユーザー ID (カンマ区切り、空=全員許可) |
 | ADMIN_TELEGRAM_IDS | No | トレード許可 Telegram ユーザー ID (カンマ区切り、空=全員許可) |
 | PORT | No | Express ヘルスチェックポート (default: 3000) |
@@ -220,9 +223,20 @@ Discord / Telegram はどちらか一方のトークンだけ設定すれば、�
 - [x] スコアリングベースの総合判定 (強度 + 根拠表示)
 - [x] 複数時間足分析 (1h ローソク足で方向確認)
 - [x] OHLCV データ取得 (exchange.js)
+- [x] 複数通貨ペア対応 (TRADE_SYMBOLS)
 - [ ] MACD 追加
 - [ ] バックテスト検証
-- [ ] 複数通貨ペア対応
+
+### Phase 2.5: マルチ対応 (完了)
+
+- [x] マルチ取引所対応 (ccxt: bitbank, Binance 等)
+- [x] マルチ通貨ペア同時監視 (TRADE_SYMBOLS)
+- [x] TUI ダッシュボード (blessed-contrib: チャート, SMA, RSI, シグナル履歴)
+- [x] TUI タイムフレーム切替 (1-8 / TAB)
+- [x] TUI シンボル切替 (S)
+- [x] JPY / USD 通貨フォーマット自動判定
+- [x] シンボルバリデーション (不正値フォールバック)
+- [ ] TUI トレードコマンド (B=buy, V=sell)
 
 ### Phase 3: サブスクリプション $5/月 (完了)
 

@@ -163,6 +163,8 @@ function startTUI() {
     refreshAll();
   });
 
+  // TODO: B=buy, V=sell トレードコマンド追加（確認ダイアログ付き）
+
   // Listen for timeframe changes
   onTimeframeChange((tf) => {
     chart.setLabel(` ${symbols[currentSymbolIdx]} Chart [${tf}] `);

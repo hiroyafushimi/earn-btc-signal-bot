@@ -5,9 +5,9 @@
 ```
 1. 初期セットアップ
    ├── 環境変数設定
-   ├── Binance API キー取得 (Testnet → 本番)
-   ├── Discord Bot 作成 & サーバー招待
-   ├── Telegram Bot 作成 (BotFather)
+   ├── 取引所 API キー取得 (bitbank推奨)
+   ├── Discord Bot 作成 & サーバー招待 (任意)
+   ├── Telegram Bot 作成 (BotFather) (任意)
    └── Stripe アカウント設定 (任意)
 
 2. デプロイ
@@ -31,25 +31,35 @@
 
 ## 1. 初期セットアップ
 
-### 1-1. Binance API キー
+### 1-1. 取引所 API キー
 
-1. https://testnet.binance.vision/ にアクセス (Testnet)
-2. GitHub アカウントでログイン
-3. API Key / Secret を生成
+#### bitbank (推奨)
+
+1. https://bitbank.cc/ でアカウント作成
+2. API キー管理ページで API Key / Secret を生成
+3. 必要な権限: **参照** + **現物取引**
 4. `.env` に設定:
 
 ```
+EXCHANGE=bitbank
 API_KEY=生成したキー
 API_SECRET=生成したシークレット
-SANDBOX=true
+TRADE_SYMBOLS=BTC/JPY,ETH/JPY,XRP/JPY,SOL/JPY,DOGE/JPY
 ```
 
-**本番移行時:**
+#### Binance (グローバル)
 
 1. https://www.binance.com/ の API 管理ページ
 2. API Key を作成 (IP 制限推奨)
 3. 必要な権限: **読み取り** + **スポット取引**
-4. `.env` の `SANDBOX=false` に変更
+4. `.env` に設定:
+
+```
+EXCHANGE=binance
+API_KEY=生成したキー
+API_SECRET=生成したシークレット
+SANDBOX=true
+```
 
 ### 1-2. Discord Bot 作成
 
@@ -120,11 +130,15 @@ ADMIN_DISCORD_IDS=111111,222222,333333
 ### 2-1. ローカル実行
 
 ```bash
+# 通常起動
 npm start
+
+# TUI ダッシュボード付き
+npm start -- --tui
 ```
 
 - 開発中のテスト用
-- `Ctrl+C` で停止
+- `Ctrl+C` / `q` / `ESC` で停止
 
 ### 2-2. PM2 デプロイ (推奨: VPS)
 
@@ -246,7 +260,7 @@ curl -s http://localhost:3000/health | jq .
 | フィールド | 正常値 | 異常時 |
 |-----------|--------|--------|
 | `status` | `"ok"` | - |
-| `exchange.connected` | `true` | `false` → API キー不正 or Binance 障害 |
+| `exchange.connected` | `true` | `false` → API キー不正 or 取引所障害 |
 | `signals.lastSignalAt` | 最近のタイムスタンプ | `null` (長時間) → 市場が安定している or 異常 |
 
 ### 3-3. シグナル品質確認
@@ -355,13 +369,13 @@ docker run -d --env-file .env -p 3000:3000 --name btc-signal-bot --restart unles
 
 ---
 
-## 5. Testnet → 本番移行
+## 5. テスト → 本番移行
 
 ### 移行チェックリスト
 
 | # | 確認項目 | 状態 |
 |---|---------|------|
-| 1 | Binance 本番 API キー作成 (IP 制限付き) | |
+| 1 | 取引所本番 API キー作成 (IP 制限推奨) | |
 | 2 | `SANDBOX=false` に変更 | |
 | 3 | `PROCESSING_AMOUNT` を本番用の金額に調整 | |
 | 4 | `ADMIN_DISCORD_IDS` / `ADMIN_TELEGRAM_IDS` に自分の ID を設定 | |
@@ -377,7 +391,8 @@ docker run -d --env-file .env -p 3000:3000 --name btc-signal-bot --restart unles
 ```bash
 # 1. .env を編集
 SANDBOX=false
-TRADE_SYMBOL=BTC/JPY  # バイナンスジャパンの場合
+EXCHANGE=bitbank
+TRADE_SYMBOLS=BTC/JPY,ETH/JPY,XRP/JPY,SOL/JPY,DOGE/JPY
 API_KEY=本番キー
 API_SECRET=本番シークレット
 STRIPE_SECRET_KEY=sk_live_xxx
@@ -394,7 +409,7 @@ pm2 restart btc-signal-bot
 
 - **最初の24時間**はログを頻繁に確認する
 - **PROCESSING_AMOUNT は最小値から**始めて、問題なければ徐々に増やす
-- **Binance API の IP 制限**を必ず設定する (VPS の IP のみ許可)
+- **取引所 API の IP 制限**を必ず設定する (VPS の IP のみ許可)
 - **ADMIN_IDS を必ず設定**して、不正トレードを防ぐ
 
 ---
@@ -412,7 +427,7 @@ pm2 restart btc-signal-bot
 ### Exchange 接続エラー
 
 ```
-[Exchange] ERROR init failed: binance requires "apiKey"
+[Exchange] ERROR init failed: bitbank requires "apiKey"
 ```
 
 → `.env` の `API_KEY` / `API_SECRET` を確認
@@ -484,6 +499,6 @@ max_memory_restart: "256M"
 | 作業 |
 |------|
 | 依存パッケージのセキュリティアップデート (`npm audit`) |
-| Binance API キーのローテーション (任意) |
+| 取引所 API キーのローテーション (任意) |
 | Stripe ダッシュボードで売上確認 |
 | テクニカル指標のパラメータレビュー |

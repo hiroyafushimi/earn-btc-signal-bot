@@ -4,8 +4,8 @@
 
 - Node.js 20+ インストール済み
 - `npm i` 完了済み
-- `.env` に Discord / Binance の設定が入っている
-- `SANDBOX=true` (Binance Testnet)
+- `.env` に取引所 (bitbank等) の設定が入っている
+- `SANDBOX=true` (テストモード)
 
 ## Phase 0: 起動テスト
 
@@ -18,14 +18,14 @@ npm start
 **期待ログ:**
 
 ```
-[HH:MM:SS] [Main] btc-signal-bot starting... #BTCto70k
-[HH:MM:SS] [Exchange] binance loaded. Sandbox: true
+[HH:MM:SS] [Main] btc-signal-bot starting...
+[HH:MM:SS] [Exchange] bitbank loaded. Sandbox: true
 [HH:MM:SS] [Subscription] STRIPE_SECRET_KEY not set, subscription disabled
 [HH:MM:SS] [Discord] Bot ready: BotName#1234
 [HH:MM:SS] [Telegram] TELEGRAM_BOT_TOKEN not set or invalid, skipping
-[HH:MM:SS] [Signal] Monitor started (interval: 60000ms, cooldown: 300000ms)
+[HH:MM:SS] [Signal] Monitor started: 5 symbols [BTC/JPY, ETH/JPY, XRP/JPY, SOL/JPY, DOGE/JPY] (interval: 60000ms, cooldown: 300000ms)
 [HH:MM:SS] [Main] Server: http://localhost:3000 (health, webhook, subscribe)
-[HH:MM:SS] [Main] btc-signal-bot ready! #BTCto70k
+[HH:MM:SS] [Main] btc-signal-bot ready!
 [HH:MM:SS] [Signal] BTC/JPY: ¥X,XXX,XXX
 ```
 
@@ -51,10 +51,10 @@ curl http://localhost:3000/health | jq .
 {
   "status": "ok",
   "uptime": "0m XXs",
-  "startedAt": "2026-02-16T...",
+  "startedAt": "2026-02-17T...",
   "exchange": {
     "connected": true,
-    "name": "binance",
+    "name": "bitbank",
     "sandbox": true
   },
   "signals": {
@@ -321,6 +321,45 @@ stripe listen --forward-to localhost:3000/webhook/stripe
 
 ---
 
+## Phase 4.5: TUI テスト
+
+### 4.5-1. TUI 起動
+
+```bash
+npm start -- --tui
+```
+
+**確認ポイント:**
+
+- [ ] チャート (左上) に価格ライン + SMA5 + SMA20 が表示されるか
+- [ ] ステータス (右上) に現在価格・RSI・タイムフレームが表示されるか
+- [ ] シグナル履歴 (左下) にテーブルが表示されるか
+- [ ] ログ (右下) に「TUI started」が表示されるか
+
+### 4.5-2. タイムフレーム切替
+
+`1`〜`8` キーまたは `TAB` を押す。
+
+**確認ポイント:**
+
+- [ ] チャートラベルのタイムフレーム表示が切り替わるか
+- [ ] ログに最新のタイムフレームのみ表示されるか (上書き)
+- [ ] チャートデータがリロードされるか
+
+### 4.5-3. シンボル切替
+
+**前提:** `.env` に `TRADE_SYMBOLS=BTC/JPY,ETH/JPY,XRP/JPY` を設定。
+
+`S` キーを押す。
+
+**確認ポイント:**
+
+- [ ] チャートラベルのシンボルが切り替わるか
+- [ ] ステータスの価格が切り替わるか
+- [ ] ログに「Symbol: ETH/JPY (2/3)」のように表示されるか
+
+---
+
 ## Phase 5: Edge Case テスト
 
 ### 5-1. Exchange 接続失敗
@@ -381,6 +420,9 @@ Discord / Telegram の両方のトークンを未設定にして起動。
 | 3-1 | シグナル生成 | |
 | 3-3 | シグナル配信 | |
 | 3-4 | 履歴保存 | |
+| 4.5-1 | TUI 起動 | |
+| 4.5-2 | タイムフレーム切替 | |
+| 4.5-3 | シンボル切替 | |
 | 5-1 | Exchange 接続失敗 | |
 | 5-2 | Discord トークン無し | |
 | 5-3 | 両プラットフォーム無効 | |
