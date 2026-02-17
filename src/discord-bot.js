@@ -1,6 +1,6 @@
 const { Client, Events, GatewayIntentBits } = require("discord.js");
 const { executeTrade, fetchPrice, getDefaultSymbol, formatPrice } = require("./exchange");
-const { onSignal, onDailySummary, getSignalStats, getRecentSignals } = require("./signal");
+const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
 const { checkLimit } = require("./rate-limit");
@@ -102,6 +102,22 @@ async function startDiscordBot() {
       return message.reply(
         [`**直近シグナル (${recent.length}件)**`, ...lines].join("\n"),
       );
+    }
+
+    // !timeframe
+    if (content === "!timeframe" || content.startsWith("!timeframe ") || content === "!tf" || content.startsWith("!tf ")) {
+      const parts = message.content.split(/\s+/);
+      const arg = parts[1];
+      if (!arg) {
+        return message.reply(
+          `現在のタイムフレーム: **${getTimeframe()}**\n有効: ${getValidTimeframes().join(", ")}\n使い方: \`!timeframe 5m\``,
+        );
+      }
+      const result = setTimeframe(arg);
+      if (!result.ok) {
+        return message.reply(result.error);
+      }
+      return message.reply(`タイムフレーム変更: ${result.prev} -> **${result.current}**`);
     }
 
     // !subscribe

@@ -11,9 +11,13 @@ const DATA_DIR = path.join(__dirname, "..", "data");
 const HISTORY_FILE = path.join(DATA_DIR, "signals.json");
 const DAILY_INTERVAL = 24 * 60 * 60 * 1000;
 
+const VALID_TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"];
+let currentTimeframe = process.env.SIGNAL_TIMEFRAME || "5m";
+
 let priceHistory = [];
 let signalListeners = [];
 let summaryListeners = [];
+let timeframeListeners = [];
 let timer = null;
 let dailyTimer = null;
 let lastSignalTime = {};
@@ -71,6 +75,36 @@ function onSignal(callback) {
 
 function onDailySummary(callback) {
   summaryListeners.push(callback);
+}
+
+function onTimeframeChange(callback) {
+  timeframeListeners.push(callback);
+}
+
+function getTimeframe() {
+  return currentTimeframe;
+}
+
+function getValidTimeframes() {
+  return VALID_TIMEFRAMES;
+}
+
+function setTimeframe(tf) {
+  const normalized = tf.toLowerCase().trim();
+  if (!VALID_TIMEFRAMES.includes(normalized)) {
+    return { ok: false, error: `無効なタイムフレーム: ${tf} (有効: ${VALID_TIMEFRAMES.join(", ")})` };
+  }
+  const prev = currentTimeframe;
+  currentTimeframe = normalized;
+  log(MOD, `Timeframe changed: ${prev} -> ${currentTimeframe}`);
+  for (const cb of timeframeListeners) {
+    try { cb(currentTimeframe, prev); } catch (e) { /* ignore */ }
+  }
+  return { ok: true, prev, current: currentTimeframe };
+}
+
+function getPriceHistory() {
+  return priceHistory;
 }
 
 function formatSignal(signal) {
@@ -177,17 +211,19 @@ async function tick() {
         return;
       }
 
-      // 複数時間足で確認 (1h ローソク足)
+      // 上位時間足で確認
+      const htfMap = { "1m": "5m", "3m": "15m", "5m": "15m", "15m": "1h", "30m": "1h", "1h": "4h", "4h": "1d", "1d": "1d" };
+      const htf = htfMap[currentTimeframe] || "1h";
       try {
-        const candles1h = await fetchOHLCV(getDefaultSymbol(), "1h", 30);
-        if (candles1h.length >= 21) {
-          const closes1h = candles1h.map((c) => c.close);
-          const htfResult = analyzeIndicators(closes1h);
+        const candlesHTF = await fetchOHLCV(getDefaultSymbol(), htf, 30);
+        if (candlesHTF.length >= 21) {
+          const closesHTF = candlesHTF.map((c) => c.close);
+          const htfResult = analyzeIndicators(closesHTF);
           if (htfResult && htfResult.side === signal.side) {
             signal.strength += 1;
-            signal.reasons.push("1h足でも同方向");
+            signal.reasons.push(`${htf}足でも同方向`);
           } else if (htfResult && htfResult.side !== signal.side) {
-            log(MOD, `1h足と方向不一致 (${signal.side} vs ${htfResult.side}), 弱めシグナル`);
+            log(MOD, `${htf}足と方向不一致 (${signal.side} vs ${htfResult.side}), 弱めシグナル`);
           }
         }
       } catch (e) {
@@ -259,9 +295,14 @@ function stopMonitor() {
 module.exports = {
   onSignal,
   onDailySummary,
+  onTimeframeChange,
   formatSignal,
   startMonitor,
   stopMonitor,
   getRecentSignals,
   getSignalStats,
+  getTimeframe,
+  setTimeframe,
+  getValidTimeframes,
+  getPriceHistory,
 };

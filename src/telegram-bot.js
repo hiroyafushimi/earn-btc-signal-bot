@@ -1,6 +1,6 @@
 const { Bot } = require("grammy");
 const { fetchPrice, executeTrade, getDefaultSymbol, formatPrice } = require("./exchange");
-const { onSignal, onDailySummary, getSignalStats, getRecentSignals } = require("./signal");
+const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
 const { checkLimit } = require("./rate-limit");
@@ -52,6 +52,7 @@ async function startTelegramBot() {
         "/price - BTC 現在価格",
         "/status - Bot ステータス",
         "/history - 直近シグナル",
+        "/timeframe [tf] - タイムフレーム変更",
         "/subscribe - サブスク登録 ($5/月)",
         "/help - ヘルプ",
       ].join("\n"),
@@ -135,6 +136,25 @@ async function startTelegramBot() {
     }
   });
 
+  // /timeframe or /tf
+  bot.command("timeframe", handleTimeframe);
+  bot.command("tf", handleTimeframe);
+
+  async function handleTimeframe(ctx) {
+    const parts = (ctx.message.text || "").split(/\s+/);
+    const arg = parts[1];
+    if (!arg) {
+      return ctx.reply(
+        `現在のタイムフレーム: ${getTimeframe()}\n有効: ${getValidTimeframes().join(", ")}\n使い方: /timeframe 5m`,
+      );
+    }
+    const result = setTimeframe(arg);
+    if (!result.ok) {
+      return ctx.reply(result.error);
+    }
+    return ctx.reply(`タイムフレーム変更: ${result.prev} -> ${result.current}`);
+  }
+
   // /help
   bot.command("help", async (ctx) => {
     await ctx.reply(
@@ -145,6 +165,7 @@ async function startTelegramBot() {
         `/price - ${getDefaultSymbol()} 現在価格`,
         "/status - Bot ステータス",
         "/history - 直近シグナル",
+        "/timeframe [tf] - タイムフレーム変更",
         "/subscribe - サブスク登録",
         "/help - このヘルプ",
         "",
