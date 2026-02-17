@@ -1,7 +1,7 @@
 const blessed = require("blessed");
 const contrib = require("blessed-contrib");
-const { fetchPrice, fetchOHLCV, getDefaultSymbol, formatPrice } = require("./exchange");
-const { getRecentSignals, getSignalStats, getTimeframe, setTimeframe, getValidTimeframes, onSignal, onTimeframeChange, getPriceHistory } = require("./signal");
+const { fetchPrice, fetchOHLCV, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol } = require("./exchange");
+const { getRecentSignals, getSignalStats, getTimeframe, setTimeframe, getValidTimeframes, onSignal, onTimeframeChange, getPriceHistory, getActiveSymbols } = require("./signal");
 const { uptimeFormatted } = require("./logger");
 const { sma, rsi } = require("./indicators");
 
@@ -11,6 +11,7 @@ let chart, signalTable, statusBox, logBox, timeframeBar;
 let chartData = { x: [], y: [] };
 let logLines = [];
 let refreshTimer = null;
+let currentSymbolIdx = 0;
 
 function addLog(msg) {
   const ts = new Date().toLocaleTimeString("ja-JP", { hour12: false });
@@ -31,9 +32,11 @@ function startTUI() {
 
   grid = new contrib.grid({ rows: 12, cols: 12, screen });
 
+  const symbols = getSymbols();
+
   // Price chart (top-left, large)
   chart = grid.set(0, 0, 7, 9, contrib.line, {
-    label: ` ${getDefaultSymbol()} Chart [${getTimeframe()}] `,
+    label: ` ${symbols[currentSymbolIdx]} Chart [${getTimeframe()}] `,
     style: {
       line: "yellow",
       text: "green",
@@ -78,7 +81,7 @@ function startTUI() {
   signalTable = grid.set(7, 0, 5, 6, contrib.table, {
     label: " Signal History ",
     columnSpacing: 2,
-    columnWidth: [6, 14, 10, 8, 20],
+    columnWidth: [6, 6, 14, 6, 18],
     fg: "white",
     selectedFg: "white",
     selectedBg: "blue",
@@ -131,9 +134,18 @@ function startTUI() {
     }
   });
 
+  // S key cycles through symbols
+  screen.key(["s"], () => {
+    currentSymbolIdx = (currentSymbolIdx + 1) % symbols.length;
+    const sym = symbols[currentSymbolIdx];
+    chart.setLabel(` ${sym} Chart [${getTimeframe()}] `);
+    addLog(`Symbol: ${sym}`);
+    refreshChart();
+  });
+
   // Listen for timeframe changes
   onTimeframeChange((tf) => {
-    chart.setLabel(` ${getDefaultSymbol()} Chart [${tf}] `);
+    chart.setLabel(` ${symbols[currentSymbolIdx]} Chart [${tf}] `);
     timeframeBar.setItems(
       getValidTimeframes().map((t) => t === tf ? `> ${t} <` : `  ${t}  `)
     );
@@ -146,7 +158,7 @@ function startTUI() {
     addLog(`Signal: ${signal.side} @${formatPrice(signal.price)} (strength: ${signal.strength})`);
   });
 
-  addLog("TUI started. Press q/ESC to quit, 1-8 or TAB to change timeframe.");
+  addLog("TUI started. q/ESC=quit, 1-8/TAB=timeframe, S=symbol");
 
   // Initial data load and start refresh
   refreshAll();
@@ -157,8 +169,10 @@ function startTUI() {
 
 async function refreshChart() {
   try {
+    const symbols = getSymbols();
+    const sym = symbols[currentSymbolIdx] || getDefaultSymbol();
     const tf = getTimeframe();
-    const candles = await fetchOHLCV(getDefaultSymbol(), tf, 60);
+    const candles = await fetchOHLCV(sym, tf, 60);
     if (candles.length === 0) return;
 
     const labels = candles.map((c) => {
@@ -188,22 +202,26 @@ async function refreshChart() {
 
 async function refreshStatus() {
   try {
-    const price = await fetchPrice();
+    const symbols = getSymbols();
+    const sym = symbols[currentSymbolIdx] || getDefaultSymbol();
+    const base = getBaseCurrencyForSymbol(sym);
+    const price = await fetchPrice(sym);
     const stats = getSignalStats();
     const currentRsi = (() => {
-      const hist = getPriceHistory();
+      const hist = getPriceHistory(sym);
       if (hist.length < 15) return null;
       return rsi(hist.map((p) => p.last), 14);
     })();
     const rsiStr = currentRsi !== null ? currentRsi.toFixed(1) : "--";
 
     const lines = [
-      `{bold}${getDefaultSymbol()}{/bold}`,
+      `{bold}${sym}{/bold} [S:switch]`,
+      `Symbols: ${symbols.map(s => s.split("/")[0]).join(",")}`,
       ``,
-      `Price: {yellow-fg}${formatPrice(price.last)}{/}`,
-      `High:  {green-fg}${formatPrice(price.high)}{/}`,
-      `Low:   {red-fg}${formatPrice(price.low)}{/}`,
-      `Vol:   ${price.volume ? price.volume.toFixed(2) : "--"} BTC`,
+      `Price: {yellow-fg}${formatPrice(price.last, sym)}{/}`,
+      `High:  {green-fg}${formatPrice(price.high, sym)}{/}`,
+      `Low:   {red-fg}${formatPrice(price.low, sym)}{/}`,
+      `Vol:   ${price.volume ? price.volume.toFixed(2) : "--"} ${base}`,
       ``,
       `RSI:   {bold}${rsiStr}{/}`,
       `TF:    {magenta-fg}${getTimeframe()}{/}`,
@@ -231,12 +249,13 @@ function refreshSignals() {
     const t = new Date(s.timestamp).toLocaleString("ja-JP", {
       month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit",
     });
+    const base = getBaseCurrencyForSymbol(s.symbol || getDefaultSymbol());
     const reasons = (s.reasons || []).slice(0, 2).join(", ");
-    return [s.side, formatPrice(s.price), `${s.strength || "-"}/6`, t, reasons];
+    return [base, s.side, formatPrice(s.price, s.symbol), `${s.strength || "-"}/6`, t];
   });
 
   signalTable.setData({
-    headers: ["Side", "Price", "Strength", "Time", "Reasons"],
+    headers: ["Sym", "Side", "Price", "Str", "Time"],
     data,
   });
 }

@@ -1,6 +1,6 @@
 const { Bot } = require("grammy");
-const { fetchPrice, executeTrade, getDefaultSymbol, formatPrice } = require("./exchange");
-const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes } = require("./signal");
+const { fetchPrice, executeTrade, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol } = require("./exchange");
+const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes, getActiveSymbols } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
 const { checkLimit } = require("./rate-limit");
@@ -42,14 +42,17 @@ async function startTelegramBot() {
 
   // /start
   bot.command("start", async (ctx) => {
+    const symbols = getSymbols();
     await ctx.reply(
       [
-        "btc-signal-bot #BTCto70k",
+        "crypto-signal-bot #MultiPair",
         "",
-        "BTC シグナル配信ボット",
+        `マルチペアシグナル配信ボット (${symbols.length}ペア)`,
+        `監視中: ${symbols.map(s => s.split("/")[0]).join(", ")}`,
         "",
         "コマンド:",
-        "/price - BTC 現在価格",
+        "/price [通貨] - 現在価格 (例: /price ETH)",
+        "/prices - 全通貨の価格一覧",
         "/status - Bot ステータス",
         "/history - 直近シグナル",
         "/timeframe [tf] - タイムフレーム変更",
@@ -59,17 +62,43 @@ async function startTelegramBot() {
     );
   });
 
-  // /price
+  // /prices (all symbols)
+  bot.command("prices", async (ctx) => {
+    try {
+      const symbols = getSymbols();
+      const lines = await Promise.all(symbols.map(async (sym) => {
+        try {
+          const p = await fetchPrice(sym);
+          const base = getBaseCurrencyForSymbol(sym);
+          return `${base}: ${formatPrice(p.last, sym)} (H: ${formatPrice(p.high, sym)} / L: ${formatPrice(p.low, sym)})`;
+        } catch { return `${sym}: Error`; }
+      }));
+      await ctx.reply(["全通貨価格", "", ...lines].join("\n"));
+    } catch (e) {
+      await ctx.reply(`Error: ${e.message}`);
+    }
+  });
+
+  // /price [symbol]
   bot.command("price", async (ctx) => {
     try {
-      const p = await fetchPrice();
+      const parts = (ctx.message.text || "").split(/\s+/);
+      const arg = parts[1];
+      const symbols = getSymbols();
+      let sym = getDefaultSymbol();
+      if (arg) {
+        const upper = arg.toUpperCase();
+        sym = symbols.find((s) => s === upper || s.startsWith(upper + "/")) || sym;
+      }
+      const p = await fetchPrice(sym);
+      const base = getBaseCurrencyForSymbol(sym);
       await ctx.reply(
         [
-          getDefaultSymbol(),
-          `価格: ${formatPrice(p.last)}`,
-          `高値: ${formatPrice(p.high)}`,
-          `安値: ${formatPrice(p.low)}`,
-          `出来高: ${p.volume.toFixed(2)} BTC`,
+          sym,
+          `価格: ${formatPrice(p.last, sym)}`,
+          `高値: ${formatPrice(p.high, sym)}`,
+          `安値: ${formatPrice(p.low, sym)}`,
+          `出来高: ${(p.volume || 0).toFixed(2)} ${base}`,
         ].join("\n"),
       );
     } catch (e) {
@@ -104,7 +133,8 @@ async function startTelegramBot() {
     }
     const lines = recent.map((s) => {
       const t = new Date(s.timestamp).toLocaleString("ja-JP");
-      return `${s.side} ${formatPrice(s.price)} (${t})`;
+      const base = getBaseCurrencyForSymbol(s.symbol || getDefaultSymbol());
+      return `[${base}] ${s.side} ${formatPrice(s.price, s.symbol)} (${t})`;
     });
     await ctx.reply(
       [`直近シグナル (${recent.length}件)`, ...lines].join("\n"),
@@ -157,19 +187,20 @@ async function startTelegramBot() {
 
   // /help
   bot.command("help", async (ctx) => {
+    const symbols = getSymbols();
     await ctx.reply(
       [
-        "btc-signal-bot ヘルプ",
+        "crypto-signal-bot ヘルプ",
         "",
-        "/start - ウェルカムメッセージ",
-        `/price - ${getDefaultSymbol()} 現在価格`,
+        `/price [通貨] - 価格 (例: /price ETH)`,
+        "/prices - 全通貨の価格一覧",
         "/status - Bot ステータス",
         "/history - 直近シグナル",
         "/timeframe [tf] - タイムフレーム変更",
         "/subscribe - サブスク登録",
         "/help - このヘルプ",
         "",
-        "#BTCto70k",
+        `監視中: ${symbols.map(s => s.split("/")[0]).join(", ")}`,
       ].join("\n"),
     );
   });

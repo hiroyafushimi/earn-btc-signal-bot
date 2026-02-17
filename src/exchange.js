@@ -6,18 +6,39 @@ const EXCHANGE = process.env.EXCHANGE || "binance";
 const DEFAULT_SYMBOL = process.env.TRADE_SYMBOL || "BTC/USDT";
 const MAX_RETRIES = 3;
 
+// Multi-symbol support: TRADE_SYMBOLS (comma-separated) or fallback to TRADE_SYMBOL
+const SYMBOLS = (() => {
+  const multi = (process.env.TRADE_SYMBOLS || "").trim();
+  if (multi) {
+    return multi.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  return [DEFAULT_SYMBOL];
+})();
+
 let exchange;
 
+function getSymbols() {
+  return [...SYMBOLS];
+}
+
 function getDefaultSymbol() {
-  return DEFAULT_SYMBOL;
+  return SYMBOLS[0];
 }
 
 function getQuoteCurrency() {
   return DEFAULT_SYMBOL.split("/")[1] || "USDT";
 }
 
-function formatPrice(value) {
-  const quote = getQuoteCurrency();
+function getQuoteCurrencyForSymbol(symbol) {
+  return symbol.split("/")[1] || "USDT";
+}
+
+function getBaseCurrencyForSymbol(symbol) {
+  return symbol.split("/")[0] || symbol;
+}
+
+function formatPrice(value, symbol) {
+  const quote = symbol ? getQuoteCurrencyForSymbol(symbol) : getQuoteCurrency();
   if (quote === "JPY") {
     return `¥${Math.round(value).toLocaleString()}`;
   }
@@ -128,4 +149,4 @@ async function fetchOHLCV(symbol = DEFAULT_SYMBOL, timeframe = "1h", limit = 50)
   }, `fetchOHLCV(${symbol},${timeframe})`);
 }
 
-module.exports = { initExchange, getExchange, fetchPrice, fetchOHLCV, executeTrade, getDefaultSymbol, getQuoteCurrency, formatPrice };
+module.exports = { initExchange, getExchange, fetchPrice, fetchOHLCV, executeTrade, getDefaultSymbol, getSymbols, getQuoteCurrency, getQuoteCurrencyForSymbol, getBaseCurrencyForSymbol, formatPrice };
