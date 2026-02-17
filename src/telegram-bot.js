@@ -53,6 +53,7 @@ async function startTelegramBot() {
         "コマンド:",
         "/price [通貨] - 現在価格 (例: /price ETH)",
         "/prices - 全通貨の価格一覧",
+        "/trade buy|sell [通貨] [数量] - トレード実行",
         "/status - Bot ステータス",
         "/history - 直近シグナル",
         "/timeframe [tf] - タイムフレーム変更",

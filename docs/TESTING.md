@@ -137,7 +137,7 @@ Exchange: binance (Sandbox: true)
 **入力:** `!subscribe`
 **期待応答:** `サブスクリプション: $5/月\n決済連携は準備中です。`
 
-### 1-6. !trade buy (管理者)
+### 1-6. !trade buy (管理者・デフォルト通貨)
 
 **前提:** `.env` の `ADMIN_DISCORD_IDS` に自分の Discord ユーザー ID を設定。
 
@@ -149,17 +149,46 @@ Exchange: binance (Sandbox: true)
 - [ ] Testnet で注文が実行されるか
 - [ ] qty が `PROCESSING_AMOUNT` (0.001) と一致するか
 
-### 1-7. !trade sell (管理者)
+### 1-7. !trade buy ETH (管理者・通貨指定)
 
-**入力:** `!trade sell`
-**期待応答:** `✅ SELL BTC/JPY | ID: XXXXX | ...`
+**入力:** `!trade buy ETH`
+**期待応答:** `✅ BUY ETH/JPY | ID: XXXXX | qty: 0.05 filled: 0.05 @¥XXX,XXX | closed`
 
-### 1-8. トレード権限制限
+**確認ポイント:**
+
+- [ ] ETH/JPY で注文されるか
+- [ ] qty が `PROCESSING_AMOUNT_ETH` の値と一致するか
+
+### 1-8. !trade sell XRP 100 (管理者・通貨+数量指定)
+
+**入力:** `!trade sell XRP 100`
+**期待応答:** `✅ SELL XRP/JPY | ID: XXXXX | qty: 100 filled: 100 @¥XXX | closed`
+
+### 1-9. !trade buy 0.5 (管理者・数量のみ指定)
+
+**入力:** `!trade buy 0.5`
+**期待応答:** `✅ BUY BTC/JPY | ID: XXXXX | qty: 0.5 ...`
+
+**確認ポイント:**
+
+- [ ] デフォルト通貨 (BTC/JPY) で実行されるか
+- [ ] qty が 0.5 であるか (数値がシンボルでなく数量として解釈されるか)
+
+### 1-10. トレード権限制限
 
 **前提:** `ADMIN_DISCORD_IDS` に自分の ID を設定した状態で、**別のユーザー**からトレードコマンドを送信。
 
 **入力 (別ユーザー):** `!trade buy`
 **期待応答:** `⛔ トレード権限がありません`
+
+### 1-11. キーワード + 通貨名検出
+
+**入力:** `ETH 買い`
+**期待応答:** `✅ BUY ETH/JPY | ...`
+
+**確認ポイント:**
+
+- [ ] メッセージ中の "ETH" が検出され、ETH/JPY で取引されるか
 
 ### 1-9. 大文字コマンド
 
@@ -210,7 +239,22 @@ Exchange: binance (Sandbox: true)
 ### 2-6. /help
 
 **入力:** `/help`
-**期待応答:** コマンドヘルプ一覧
+**期待応答:** コマンドヘルプ一覧 (/trade コマンドが含まれていること)
+
+### 2-7. /trade buy ETH
+
+**入力:** `/trade buy ETH`
+**期待応答:** `✅ BUY ETH/JPY | ID: XXXXX | ...`
+
+### 2-8. /trade (引数なし)
+
+**入力:** `/trade`
+**期待応答:** `使い方: /trade buy [通貨] [数量]`
+
+### 2-9. テキストトレード + 通貨検出
+
+**入力:** `SOL 売り`
+**期待応答:** `✅ SELL SOL/JPY | ...`
 
 ---
 
@@ -395,8 +439,8 @@ Discord / Telegram の両方のトークンを未設定にして起動。
 
 `.env` で `ADMIN_DISCORD_IDS=` (空) にして起動。
 
-**入力:** `!trade buy`
-**期待応答:** `✅ BUY BTC/JPY | ...` (空 = 全員許可)
+**入力:** `!trade buy ETH`
+**期待応答:** `✅ BUY ETH/JPY | ...` (空 = 全員許可、通貨指定が反映されるか)
 
 ---
 
@@ -412,11 +456,17 @@ Discord / Telegram の両方のトークンを未設定にして起動。
 | 1-3 | !status | |
 | 1-4 | !history | |
 | 1-5 | !subscribe | |
-| 1-6 | !trade buy | |
-| 1-7 | !trade sell | |
-| 1-8 | トレード権限制限 | |
-| 1-9 | 大文字コマンド | |
-| 1-10 | レート制限 | |
+| 1-6 | !trade buy (デフォルト通貨) | |
+| 1-7 | !trade buy ETH (通貨指定) | |
+| 1-8 | !trade sell XRP 100 (通貨+数量) | |
+| 1-9 | !trade buy 0.5 (数量のみ) | |
+| 1-10 | トレード権限制限 | |
+| 1-11 | キーワード + 通貨名検出 | |
+| 1-12 | 大文字コマンド | |
+| 1-13 | レート制限 | |
+| 2-7 | /trade buy ETH (Telegram) | |
+| 2-8 | /trade 引数なし (Telegram) | |
+| 2-9 | テキストトレード + 通貨検出 (Telegram) | |
 | 3-1 | シグナル生成 | |
 | 3-3 | シグナル配信 | |
 | 3-4 | 履歴保存 | |

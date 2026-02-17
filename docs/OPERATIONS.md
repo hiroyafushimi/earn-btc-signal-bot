@@ -45,6 +45,13 @@ EXCHANGE=bitbank
 API_KEY=生成したキー
 API_SECRET=生成したシークレット
 TRADE_SYMBOLS=BTC/JPY,ETH/JPY,XRP/JPY,SOL/JPY,DOGE/JPY
+
+# コイン別取引量
+PROCESSING_AMOUNT_BTC=0.001
+PROCESSING_AMOUNT_ETH=0.05
+PROCESSING_AMOUNT_XRP=100
+PROCESSING_AMOUNT_SOL=1
+PROCESSING_AMOUNT_DOGE=1000
 ```
 
 #### Binance (グローバル)
@@ -233,7 +240,20 @@ docker run -d \
 **シグナル発火時:**
 
 ```
-[HH:MM:SS] [Signal] Signal: BUY @$68302
+[HH:MM:SS] [Signal] Signal: ETH/JPY BUY @¥450,000
+```
+
+**自動トレード実行時 (AUTO_TRADE=true):**
+
+```
+[HH:MM:SS] [Signal] Auto-trade: buy ETH/JPY qty=0.05 (strength=5)
+[HH:MM:SS] [Signal] Auto-trade OK: buy ETH/JPY filled=0.05 @450100
+```
+
+**自動トレード失敗時:**
+
+```
+[HH:MM:SS] [Signal] ERROR Auto-trade FAILED: ETH/JPY BUY: Insufficient JPY balance: 0
 ```
 
 **異常時のログパターン:**
@@ -377,14 +397,16 @@ docker run -d --env-file .env -p 3000:3000 --name btc-signal-bot --restart unles
 |---|---------|------|
 | 1 | 取引所本番 API キー作成 (IP 制限推奨) | |
 | 2 | `SANDBOX=false` に変更 | |
-| 3 | `PROCESSING_AMOUNT` を本番用の金額に調整 | |
+| 3 | `PROCESSING_AMOUNT` / `PROCESSING_AMOUNT_{COIN}` を本番用の金額に調整 | |
 | 4 | `ADMIN_DISCORD_IDS` / `ADMIN_TELEGRAM_IDS` に自分の ID を設定 | |
-| 5 | Testnet でのトレードテスト完了 | |
-| 6 | Stripe を本番モードに切り替え (`sk_live_xxx`) | |
-| 7 | `BASE_URL` を本番ドメインに変更 | |
-| 8 | Stripe Webhook エンドポイントを本番 URL に設定 | |
-| 9 | `SIGNAL_INTERVAL` / `SIGNAL_COOLDOWN` を本番用に調整 | |
-| 10 | Discord シグナルチャンネル ID を本番チャンネルに変更 | |
+| 5 | Testnet でのトレードテスト完了 (各通貨ペアで !trade / /trade テスト) | |
+| 6 | `AUTO_TRADE` を意図通りに設定 (最初は false 推奨) | |
+| 7 | `AUTO_TRADE_MIN_STRENGTH` / `AUTO_TRADE_SYMBOLS` を確認 | |
+| 8 | Stripe を本番モードに切り替え (`sk_live_xxx`) | |
+| 9 | `BASE_URL` を本番ドメインに変更 | |
+| 10 | Stripe Webhook エンドポイントを本番 URL に設定 | |
+| 11 | `SIGNAL_INTERVAL` / `SIGNAL_COOLDOWN` を本番用に調整 | |
+| 12 | Discord シグナルチャンネル ID を本番チャンネルに変更 | |
 
 ### 移行手順
 
@@ -398,10 +420,17 @@ API_SECRET=本番シークレット
 STRIPE_SECRET_KEY=sk_live_xxx
 BASE_URL=https://your-domain.com
 
-# 2. 少額でトレードテスト
-PROCESSING_AMOUNT=0.0001  # 最小単位で
+# 2. コイン別取引量を最小単位で設定
+PROCESSING_AMOUNT_BTC=0.0001
+PROCESSING_AMOUNT_ETH=0.001
+PROCESSING_AMOUNT_XRP=1
+PROCESSING_AMOUNT_SOL=0.01
+PROCESSING_AMOUNT_DOGE=1
 
-# 3. 再起動
+# 3. 自動トレードは最初は無効で
+AUTO_TRADE=false
+
+# 4. 再起動
 pm2 restart btc-signal-bot
 ```
 
@@ -409,6 +438,8 @@ pm2 restart btc-signal-bot
 
 - **最初の24時間**はログを頻繁に確認する
 - **PROCESSING_AMOUNT は最小値から**始めて、問題なければ徐々に増やす
+- **AUTO_TRADE は最初 false**にし、手動トレードで問題ないことを確認してから有効化
+- **AUTO_TRADE_MIN_STRENGTH は 4 以上**を推奨（弱いシグナルで自動売買しない）
 - **取引所 API の IP 制限**を必ず設定する (VPS の IP のみ許可)
 - **ADMIN_IDS を必ず設定**して、不正トレードを防ぐ
 
