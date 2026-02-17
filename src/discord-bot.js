@@ -171,16 +171,28 @@ async function startDiscordBot() {
     // Trade detection: !trade buy [symbol] [amount] or !trade sell ETH 0.5
     let side, tradeSymbol, amount;
 
-    const cmdMatch = content.match(/!trade\s+(buy|sell)(?:\s+(\S+))?(?:\s+([\d.]+))?/i);
+    const cmdMatch = content.match(/!trade\s+(buy|sell)(?:\s+([a-z][a-z0-9/]*)\s*([\d.]+)?|\s+([\d.]+))?/i);
     if (cmdMatch) {
       side = cmdMatch[1].toLowerCase();
       if (cmdMatch[2]) tradeSymbol = resolveSymbol(cmdMatch[2]);
       if (cmdMatch[3]) amount = parseFloat(cmdMatch[3]);
+      if (cmdMatch[4]) amount = parseFloat(cmdMatch[4]);
     } else {
       if (/(?:🚀|buy|long|入|買い)/.test(content)) {
         side = "buy";
       } else if (/(?:sell|short|出|売り)/.test(content)) {
         side = "sell";
+      }
+      // Try to detect coin name from message (e.g. "buy ETH", "ETH 買い")
+      if (side) {
+        const symbols = getSymbols();
+        for (const s of symbols) {
+          const base = s.split("/")[0].toLowerCase();
+          if (content.includes(base)) {
+            tradeSymbol = s;
+            break;
+          }
+        }
       }
     }
 

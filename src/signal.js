@@ -231,18 +231,13 @@ function isAutoTradeTarget(symbol) {
 }
 
 async function emitSignal(signal) {
-  const message = formatSignal(signal);
-  log(MOD, `Signal: ${signal.symbol} ${signal.side} @${formatPrice(signal.price, signal.symbol)}`);
-
   const key = `${signal.symbol}:${signal.side}`;
   lastSignalTime[key] = Date.now();
   lastSignalAt = Date.now();
   signalCount[signal.side.toLowerCase()] =
     (signalCount[signal.side.toLowerCase()] || 0) + 1;
 
-  saveSignal(signal);
-
-  // Auto-trade execution
+  // Auto-trade execution (before save/format so results are included)
   if (AUTO_TRADE && signal.strength >= AUTO_TRADE_MIN_STRENGTH && isAutoTradeTarget(signal.symbol)) {
     try {
       const side = signal.side.toLowerCase();
@@ -258,6 +253,11 @@ async function emitSignal(signal) {
       signal.tradeError = e.message;
     }
   }
+
+  saveSignal(signal);
+
+  const message = formatSignal(signal);
+  log(MOD, `Signal: ${signal.symbol} ${signal.side} @${formatPrice(signal.price, signal.symbol)}`);
 
   for (const cb of signalListeners) {
     try {
