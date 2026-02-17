@@ -2,25 +2,70 @@ const ccxt = require("ccxt");
 const { log, error } = require("./logger");
 
 const MOD = "Exchange";
-const EXCHANGE = process.env.EXCHANGE || "binance";
-const DEFAULT_SYMBOL = process.env.TRADE_SYMBOL || "BTC/USDT";
+const EXCHANGE = process.env.EXCHANGE || "bitbank";
 const MAX_RETRIES = 3;
+
+// Validate symbol format: must be "BASE/QUOTE" (e.g. BTC/JPY)
+function isValidSymbol(s) {
+  return /^[A-Z0-9]{2,10}\/[A-Z]{3,5}$/.test(s);
+}
+
+const DEFAULT_SYMBOL = (() => {
+  const raw = (process.env.TRADE_SYMBOL || "BTC/JPY").trim();
+  if (!isValidSymbol(raw)) {
+    error(MOD, `Invalid TRADE_SYMBOL: "${raw}" - must be BASE/QUOTE format (e.g. BTC/JPY). Using BTC/JPY`);
+    return "BTC/JPY";
+  }
+  return raw;
+})();
+
+// Multi-symbol support: TRADE_SYMBOLS (comma-separated) or fallback to TRADE_SYMBOL
+const SYMBOLS = (() => {
+  const multi = (process.env.TRADE_SYMBOLS || "").trim();
+  if (multi) {
+    const parsed = multi.split(",").map((s) => s.trim()).filter(Boolean);
+    const valid = parsed.filter((s) => {
+      if (isValidSymbol(s)) return true;
+      error(MOD, `Invalid symbol skipped: "${s}" - must be BASE/QUOTE format (e.g. BTC/JPY)`);
+      return false;
+    });
+    if (valid.length > 0) return valid;
+    error(MOD, "No valid symbols in TRADE_SYMBOLS, falling back to TRADE_SYMBOL");
+  }
+  return [DEFAULT_SYMBOL];
+})();
 
 let exchange;
 
+function getSymbols() {
+  return [...SYMBOLS];
+}
+
 function getDefaultSymbol() {
-  return DEFAULT_SYMBOL;
+  return SYMBOLS[0];
 }
 
 function getQuoteCurrency() {
   return DEFAULT_SYMBOL.split("/")[1] || "USDT";
 }
 
-function formatPrice(value) {
-  const quote = getQuoteCurrency();
+function getQuoteCurrencyForSymbol(symbol) {
+  return symbol.split("/")[1] || "USDT";
+}
+
+function getBaseCurrencyForSymbol(symbol) {
+  return symbol.split("/")[0] || symbol;
+}
+
+function formatPrice(value, symbol) {
+  if (value == null || isNaN(value)) return "--";
+  const quote = symbol ? getQuoteCurrencyForSymbol(symbol) : getQuoteCurrency();
   if (quote === "JPY") {
     return `¥${Math.round(value).toLocaleString()}`;
   }
+  // Low-price coins (e.g. DOGE/USDT) need decimal places
+  if (value < 1) return `$${value.toFixed(6)}`;
+  if (value < 100) return `$${value.toFixed(4)}`;
   return `$${value.toLocaleString()}`;
 }
 
@@ -39,12 +84,13 @@ async function withRetry(fn, label) {
 
 async function initExchange() {
   try {
-    exchange = new ccxt[EXCHANGE]({
+    const ex = new ccxt[EXCHANGE]({
       apiKey: process.env.API_KEY,
       secret: process.env.API_SECRET,
       sandbox: process.env.SANDBOX === "true",
     });
-    await exchange.loadMarkets();
+    await ex.loadMarkets();
+    exchange = ex;
     log(MOD, `${EXCHANGE} loaded. Sandbox: ${exchange.sandbox}`);
     return exchange;
   } catch (e) {
@@ -86,19 +132,35 @@ async function executeTrade(side, symbol = DEFAULT_SYMBOL, amount) {
       () => exchange.fetchBalance(),
       "fetchBalance",
     );
-    const quoteCurrency = getQuoteCurrency();
+    // Use the quote currency of the actual symbol being traded
+    const quoteCurrency = getQuoteCurrencyForSymbol(symbol);
     const quoteFree = balance.free[quoteCurrency] || 0;
+    if (quoteFree <= 0) {
+      throw new Error(`Insufficient ${quoteCurrency} balance: ${quoteFree}`);
+    }
     const ticker = await withRetry(
       () => exchange.fetchTicker(symbol),
       "fetchTicker",
     );
+    if (!ticker.last || ticker.last <= 0) {
+      throw new Error(`Invalid ticker price for ${symbol}: ${ticker.last}`);
+    }
     qty = (quoteFree * riskPct) / ticker.last;
   }
 
-  const order = await withRetry(
-    () => exchange.createMarketOrder(symbol, side, qty),
-    `createMarketOrder(${side})`,
-  );
+  if (qty <= 0 || isNaN(qty)) {
+    throw new Error(`Invalid trade quantity: ${qty}`);
+  }
+
+  // CRITICAL: Market orders must NOT be retried - a timeout doesn't mean
+  // the order wasn't placed. Retrying could cause duplicate orders.
+  let order;
+  try {
+    order = await exchange.createMarketOrder(symbol, side, qty);
+  } catch (e) {
+    error(MOD, `Trade FAILED: ${side} ${symbol} qty=${qty}: ${e.message}`);
+    throw e;
+  }
 
   log(MOD, `Trade OK: ${side} ${symbol} qty=${qty} filled=${order.filled}`);
 
@@ -108,7 +170,7 @@ async function executeTrade(side, symbol = DEFAULT_SYMBOL, amount) {
     symbol,
     qty,
     filled: order.filled || 0,
-    average: order.average || "mkt",
+    average: order.average || 0,
     status: order.status,
   };
 }
@@ -128,4 +190,4 @@ async function fetchOHLCV(symbol = DEFAULT_SYMBOL, timeframe = "1h", limit = 50)
   }, `fetchOHLCV(${symbol},${timeframe})`);
 }
 
-module.exports = { initExchange, getExchange, fetchPrice, fetchOHLCV, executeTrade, getDefaultSymbol, getQuoteCurrency, formatPrice };
+module.exports = { initExchange, getExchange, fetchPrice, fetchOHLCV, executeTrade, getDefaultSymbol, getSymbols, getQuoteCurrency, getQuoteCurrencyForSymbol, getBaseCurrencyForSymbol, formatPrice };

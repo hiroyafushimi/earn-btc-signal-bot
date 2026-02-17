@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { fetchPrice, fetchOHLCV, getDefaultSymbol, formatPrice } = require("./exchange");
+const { fetchPrice, fetchOHLCV, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol } = require("./exchange");
 const { log, error } = require("./logger");
 const { analyzeIndicators, sma, rsi } = require("./indicators");
 
@@ -14,15 +14,18 @@ const DAILY_INTERVAL = 24 * 60 * 60 * 1000;
 const VALID_TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"];
 let currentTimeframe = process.env.SIGNAL_TIMEFRAME || "5m";
 
-let priceHistory = [];
+// Per-symbol state
+let priceHistories = {};  // { "BTC/USDT": [...], "ETH/USDT": [...] }
+let lastSignalTime = {};  // { "BTC/USDT:BUY": timestamp, ... }
+let signalCount = { buy: 0, sell: 0 };
+let lastSignalAt = null;
+
 let signalListeners = [];
 let summaryListeners = [];
 let timeframeListeners = [];
 let timer = null;
 let dailyTimer = null;
-let lastSignalTime = {};
-let signalCount = { buy: 0, sell: 0 };
-let lastSignalAt = null;
+let saveLock = false;
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -44,6 +47,12 @@ function loadHistory() {
 
 function saveSignal(signal) {
   ensureDataDir();
+  // Simple lock to prevent concurrent writes from multiple symbols
+  if (saveLock) {
+    setTimeout(() => saveSignal(signal), 50);
+    return;
+  }
+  saveLock = true;
   try {
     const history = loadHistory();
     history.push(signal);
@@ -52,15 +61,30 @@ function saveSignal(signal) {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify(trimmed, null, 2));
   } catch (e) {
     error(MOD, "Failed to save signal:", e.message);
+  } finally {
+    saveLock = false;
   }
 }
 
-function getRecentSignals(count = 5) {
+function getRecentSignals(count = 5, symbol) {
   const history = loadHistory();
-  return history.slice(-count);
+  const filtered = symbol
+    ? history.filter((s) => s.symbol === symbol)
+    : history;
+  return filtered.slice(-count);
 }
 
-function getSignalStats() {
+function getSignalStats(symbol) {
+  if (symbol) {
+    const history = loadHistory();
+    const filtered = history.filter((s) => s.symbol === symbol);
+    return {
+      totalBuy: filtered.filter((s) => s.side === "BUY").length,
+      totalSell: filtered.filter((s) => s.side === "SELL").length,
+      lastSignalAt: filtered.length > 0 ? filtered[filtered.length - 1].timestamp : null,
+      historyCount: filtered.length,
+    };
+  }
   return {
     totalBuy: signalCount.buy,
     totalSell: signalCount.sell,
@@ -103,17 +127,27 @@ function setTimeframe(tf) {
   return { ok: true, prev, current: currentTimeframe };
 }
 
-function getPriceHistory() {
-  return priceHistory;
+function getActiveSymbols() {
+  return getSymbols();
+}
+
+function getPriceHistory(symbol) {
+  if (symbol) {
+    return priceHistories[symbol] || [];
+  }
+  // Backward compatibility: return default symbol's history
+  return priceHistories[getDefaultSymbol()] || [];
 }
 
 function formatSignal(signal) {
-  const price = formatPrice(signal.price);
-  const target = formatPrice(signal.target);
-  const sl = formatPrice(signal.stopLoss);
+  const price = formatPrice(signal.price, signal.symbol);
+  const target = formatPrice(signal.target, signal.symbol);
+  const sl = formatPrice(signal.stopLoss, signal.symbol);
+  const base = getBaseCurrencyForSymbol(signal.symbol);
+  const tag = `#${base}Signal`;
 
   const lines = [
-    `#BTCto70k シグナル`,
+    `${tag} シグナル`,
     ``,
     `方向: ${signal.side}`,
     `通貨: ${signal.symbol}`,
@@ -135,7 +169,7 @@ function formatSignal(signal) {
   return lines.join("\n");
 }
 
-function analyze(priceObjs) {
+function analyze(priceObjs, symbol) {
   const prices = priceObjs.map((p) => p.last);
   if (prices.length < 21) return null;
 
@@ -145,12 +179,20 @@ function analyze(priceObjs) {
   const current = prices[prices.length - 1];
   const isBuy = result.side === "BUY";
 
+  // Use appropriate precision: round to integer for high-price (JPY, BTC),
+  // keep decimals for low-price coins
+  const roundPrice = (v) => {
+    if (v >= 100) return Math.round(v);
+    if (v >= 1) return Math.round(v * 100) / 100;
+    return Math.round(v * 1000000) / 1000000;
+  };
+
   return {
     side: result.side,
-    symbol: getDefaultSymbol(),
+    symbol: symbol,
     price: current,
-    target: Math.round(current * (isBuy ? 1.03 : 0.97)),
-    stopLoss: Math.round(current * (isBuy ? 0.98 : 1.02)),
+    target: roundPrice(current * (isBuy ? 1.03 : 0.97)),
+    stopLoss: roundPrice(current * (isBuy ? 0.98 : 1.02)),
     riskPct: 1,
     strength: result.strength,
     reasons: result.reasons,
@@ -158,17 +200,19 @@ function analyze(priceObjs) {
   };
 }
 
-function isCooldownActive(side) {
-  const last = lastSignalTime[side];
+function isCooldownActive(symbol, side) {
+  const key = `${symbol}:${side}`;
+  const last = lastSignalTime[key];
   if (!last) return false;
   return Date.now() - last < COOLDOWN;
 }
 
 async function emitSignal(signal) {
   const message = formatSignal(signal);
-  log(MOD, `Signal: ${signal.side} @${formatPrice(signal.price)}`);
+  log(MOD, `Signal: ${signal.symbol} ${signal.side} @${formatPrice(signal.price, signal.symbol)}`);
 
-  lastSignalTime[signal.side] = Date.now();
+  const key = `${signal.symbol}:${signal.side}`;
+  lastSignalTime[key] = Date.now();
   lastSignalAt = Date.now();
   signalCount[signal.side.toLowerCase()] =
     (signalCount[signal.side.toLowerCase()] || 0) + 1;
@@ -184,30 +228,34 @@ async function emitSignal(signal) {
   }
 }
 
-async function tick() {
+async function tickSymbol(symbol) {
   try {
-    const price = await fetchPrice();
-    priceHistory.push(price);
+    const price = await fetchPrice(symbol);
 
-    if (priceHistory.length > 100) {
-      priceHistory = priceHistory.slice(-100);
+    if (!priceHistories[symbol]) {
+      priceHistories[symbol] = [];
+    }
+    priceHistories[symbol].push(price);
+
+    if (priceHistories[symbol].length > 100) {
+      priceHistories[symbol] = priceHistories[symbol].slice(-100);
     }
 
-    const prices = priceHistory.map((p) => p.last);
+    const prices = priceHistories[symbol].map((p) => p.last);
     const currentRsi = prices.length >= 15 ? rsi(prices, 14) : null;
     const sma5 = sma(prices, 5);
     const sma20 = sma(prices, 20);
     const rsiStr = currentRsi !== null ? ` RSI:${currentRsi.toFixed(1)}` : "";
     const smaStr =
       sma5 && sma20
-        ? ` SMA5:${formatPrice(sma5)} SMA20:${formatPrice(sma20)}`
+        ? ` SMA5:${formatPrice(sma5, symbol)} SMA20:${formatPrice(sma20, symbol)}`
         : "";
-    log(MOD, `${getDefaultSymbol()}: ${formatPrice(price.last)}${rsiStr}${smaStr}`);
+    log(MOD, `${symbol}: ${formatPrice(price.last, symbol)}${rsiStr}${smaStr}`);
 
-    const signal = analyze(priceHistory);
+    const signal = analyze(priceHistories[symbol], symbol);
     if (signal) {
-      if (isCooldownActive(signal.side)) {
-        log(MOD, `Cooldown active for ${signal.side}, skipped`);
+      if (isCooldownActive(symbol, signal.side)) {
+        log(MOD, `[${symbol}] Cooldown active for ${signal.side}, skipped`);
         return;
       }
 
@@ -215,7 +263,7 @@ async function tick() {
       const htfMap = { "1m": "5m", "3m": "15m", "5m": "15m", "15m": "1h", "30m": "1h", "1h": "4h", "4h": "1d", "1d": "1d" };
       const htf = htfMap[currentTimeframe] || "1h";
       try {
-        const candlesHTF = await fetchOHLCV(getDefaultSymbol(), htf, 30);
+        const candlesHTF = await fetchOHLCV(symbol, htf, 30);
         if (candlesHTF.length >= 21) {
           const closesHTF = candlesHTF.map((c) => c.close);
           const htfResult = analyzeIndicators(closesHTF);
@@ -223,44 +271,60 @@ async function tick() {
             signal.strength += 1;
             signal.reasons.push(`${htf}足でも同方向`);
           } else if (htfResult && htfResult.side !== signal.side) {
-            log(MOD, `${htf}足と方向不一致 (${signal.side} vs ${htfResult.side}), 弱めシグナル`);
+            log(MOD, `[${symbol}] ${htf}足と方向不一致 (${signal.side} vs ${htfResult.side}), 弱めシグナル`);
           }
         }
       } catch (e) {
-        log(MOD, `OHLCV fetch skipped: ${e.message}`);
+        log(MOD, `[${symbol}] OHLCV fetch skipped: ${e.message}`);
       }
 
       await emitSignal(signal);
     }
   } catch (e) {
-    error(MOD, "tick error:", e.message);
+    error(MOD, `[${symbol}] tick error: ${e.message}`);
   }
+}
+
+async function tick() {
+  const symbols = getSymbols();
+  // Process all symbols concurrently
+  await Promise.allSettled(symbols.map((symbol) => tickSymbol(symbol)));
 }
 
 async function emitDailySummary() {
   const history = loadHistory();
   const oneDayAgo = Date.now() - DAILY_INTERVAL;
   const todaySignals = history.filter((s) => s.timestamp > oneDayAgo);
+  const symbols = getSymbols();
 
-  const prices = priceHistory.map((p) => p.last);
-  const high = prices.length > 0 ? Math.max(...prices) : 0;
-  const low = prices.length > 0 ? Math.min(...prices) : 0;
-  const current = prices.length > 0 ? prices[prices.length - 1] : 0;
+  const lines = [
+    `#CryptoSignals 日次サマリー`,
+    ``,
+  ];
 
-  const summary = [
-    `#BTCto70k 日次サマリー`,
-    ``,
-    `${getDefaultSymbol()}: ${formatPrice(current)}`,
-    `24h High: ${formatPrice(high)}`,
-    `24h Low: ${formatPrice(low)}`,
-    ``,
-    `シグナル数: ${todaySignals.length}`,
-    `  BUY: ${todaySignals.filter((s) => s.side === "BUY").length}`,
-    `  SELL: ${todaySignals.filter((s) => s.side === "SELL").length}`,
-    ``,
+  for (const symbol of symbols) {
+    const symPrices = (priceHistories[symbol] || []).map((p) => p.last);
+    const high = symPrices.length > 0 ? Math.max(...symPrices) : 0;
+    const low = symPrices.length > 0 ? Math.min(...symPrices) : 0;
+    const current = symPrices.length > 0 ? symPrices[symPrices.length - 1] : 0;
+    const symSignals = todaySignals.filter((s) => s.symbol === symbol);
+
+    lines.push(
+      `--- ${symbol} ---`,
+      `価格: ${formatPrice(current, symbol)}`,
+      `24h High: ${formatPrice(high, symbol)}`,
+      `24h Low: ${formatPrice(low, symbol)}`,
+      `シグナル: BUY ${symSignals.filter((s) => s.side === "BUY").length} / SELL ${symSignals.filter((s) => s.side === "SELL").length}`,
+      ``,
+    );
+  }
+
+  lines.push(
+    `合計シグナル: ${todaySignals.length}`,
     `${new Date().toISOString()}`,
-  ].join("\n");
+  );
 
+  const summary = lines.join("\n");
   log(MOD, "Daily summary sent");
 
   for (const cb of summaryListeners) {
@@ -273,7 +337,8 @@ async function emitDailySummary() {
 }
 
 function startMonitor() {
-  log(MOD, `Monitor started (interval: ${INTERVAL}ms, cooldown: ${COOLDOWN}ms)`);
+  const symbols = getSymbols();
+  log(MOD, `Monitor started: ${symbols.length} symbols [${symbols.join(", ")}] (interval: ${INTERVAL}ms, cooldown: ${COOLDOWN}ms)`);
   tick();
   timer = setInterval(tick, INTERVAL);
 
@@ -305,4 +370,5 @@ module.exports = {
   setTimeframe,
   getValidTimeframes,
   getPriceHistory,
+  getActiveSymbols,
 };

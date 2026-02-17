@@ -1,16 +1,19 @@
 # btc-signal-bot
 
-Discord + Telegram BTC シグナル配信ボット (#BTCto70k) -- サブスク $5/月
+仮想通貨シグナル配信ボット -- サブスク $5/月
 
 ## 概要
 
-BTC の価格シグナルを **Discord** と **Telegram** で配信するボット。
-Binance API でリアルタイム価格を監視し、テクニカル指標 (SMA, RSI) に基づく売買シグナルを自動生成してサブスクライバーに配信する。
+仮想通貨の価格シグナルを **Discord**・**Telegram**・**TUI (ターミナル)** で配信するボット。
+ccxt 経由で取引所 API に接続し、テクニカル指標 (SMA, RSI) に基づく売買シグナルを自動生成してサブスクライバーに配信する。
 
-- **マルチプラットフォーム**: Discord + Telegram 両対応 (片方のみでも動作)
+- **マルチ取引所**: bitbank (推奨)、Binance 等 ccxt 対応取引所
+- **マルチ通貨ペア**: BTC/JPY, ETH/JPY, XRP/JPY 等を同時監視
+- **マルチプラットフォーム**: Discord + Telegram + TUI 対応 (任意の組み合わせ)
 - **テクニカル分析**: SMA クロスオーバー + RSI + 複数時間足確認
 - **シグナル配信**: スコアリングに基づく BUY/SELL シグナル (根拠付き)
-- **トレード実行**: コマンドで Binance 発注 (管理者権限制限あり)
+- **トレード実行**: コマンドで取引所に発注 (管理者権限制限あり)
+- **TUI ダッシュボード**: ターミナルでリアルタイムチャート・シグナル監視
 - **サブスクリプション**: Stripe 連携で $5/月
 - **運用機能**: ヘルスチェック、ログ、リトライ、レート制限、PM2/Docker 対応
 
@@ -21,7 +24,8 @@ Binance API でリアルタイム価格を監視し、テクニカル指標 (SMA
 | Node.js | ランタイム |
 | discord.js | Discord Bot |
 | grammy | Telegram Bot |
-| ccxt (Binance) | 価格データ・OHLCV 取得・トレード実行 |
+| ccxt | 取引所接続 (bitbank/Binance等) - 価格・OHLCV・トレード |
+| blessed-contrib | TUI ダッシュボード (チャート・テーブル) |
 | Express | ヘルスチェック / Stripe Webhook |
 | Stripe | サブスクリプション決済 |
 
@@ -31,9 +35,10 @@ Binance API でリアルタイム価格を監視し、テクニカル指標 (SMA
 src/
   index.js          エントリポイント (Express + graceful shutdown)
   logger.js         タイムスタンプ付きロガー
-  exchange.js       Binance 接続 (ccxt + リトライ)
+  exchange.js       取引所接続 (ccxt + リトライ + マルチシンボル)
   indicators.js     テクニカル分析 (SMA, RSI, クロスオーバー)
   signal.js         価格監視 + シグナル生成 + 履歴保存
+  tui.js            TUI ダッシュボード (チャート + シグナル + ステータス)
   discord-bot.js    Discord Bot
   telegram-bot.js   Telegram Bot
   subscription.js   Stripe 決済 + ユーザー管理
@@ -74,9 +79,10 @@ DISCORD_SIGNAL_CHANNEL_ID=your_channel_id
 TELEGRAM_BOT_TOKEN=123456:ABC-xxx
 TELEGRAM_CHANNEL_ID=your_channel_id
 
-# Binance
-EXCHANGE=binance
-TRADE_SYMBOL=BTC/JPY  # or BTC/USDT
+# 取引所
+EXCHANGE=bitbank
+TRADE_SYMBOL=BTC/JPY
+TRADE_SYMBOLS=BTC/JPY,ETH/JPY,XRP/JPY,SOL/JPY,DOGE/JPY
 API_KEY=your_key
 API_SECRET=your_secret
 SANDBOX=true
@@ -95,7 +101,11 @@ BASE_URL=http://localhost:3000
 ### 3. 起動
 
 ```bash
+# 通常起動
 npm start
+
+# TUI ダッシュボード付き
+npm start -- --tui
 ```
 
 ### デプロイ (PM2)
@@ -137,18 +147,30 @@ docker run -d --env-file .env -p 3000:3000 btc-signal-bot
 | `/subscribe` | サブスク登録 ($5/月) |
 | `/help` | ヘルプ |
 
+## TUI ダッシュボード
+
+`npm start -- --tui` でターミナルダッシュボードを起動。
+
+| キー | 操作 |
+|------|------|
+| `1`-`8` / `TAB` | タイムフレーム切替 (1m, 3m, 5m, 15m, 30m, 1h, 4h, 1d) |
+| `S` | 監視銘柄切替 (TRADE_SYMBOLS 設定時) |
+| `q` / `ESC` | 終了 |
+
+表示内容: リアルタイムチャート (Price + SMA5 + SMA20)、RSI、シグナル履歴、ログ
+
 ## シグナル
 
-テクニカル指標 (SMA5/20 クロスオーバー, RSI14) + 1h 足確認のスコアリング判定。
+テクニカル指標 (SMA5/20 クロスオーバー, RSI14) + 上位時間足確認のスコアリング判定。
 
 ```
-#BTCto70k シグナル
+#BTCSignal シグナル
 
 方向: BUY
 通貨: BTC/JPY
 価格: ¥10,200,000
-ターゲット: $70,351
-ストップロス: $66,936
+ターゲット: ¥10,506,000
+ストップロス: ¥9,996,000
 リスク: 1%
 強度: 4/6
 

@@ -1,6 +1,6 @@
 const { Client, Events, GatewayIntentBits } = require("discord.js");
-const { executeTrade, fetchPrice, getDefaultSymbol, formatPrice } = require("./exchange");
-const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes } = require("./signal");
+const { executeTrade, fetchPrice, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol } = require("./exchange");
+const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes, getActiveSymbols } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
 const { checkLimit } = require("./rate-limit");
@@ -58,12 +58,36 @@ async function startDiscordBot() {
       return message.reply("pong #BTCto70k");
     }
 
-    // !price
-    if (content === "!price") {
+    // !price [symbol] or !prices
+    if (content === "!prices") {
       try {
-        const p = await fetchPrice();
+        const symbols = getSymbols();
+        const lines = await Promise.all(symbols.map(async (sym) => {
+          try {
+            const p = await fetchPrice(sym);
+            const base = getBaseCurrencyForSymbol(sym);
+            return `${base}: ${formatPrice(p.last, sym)} | H: ${formatPrice(p.high, sym)} | L: ${formatPrice(p.low, sym)}`;
+          } catch { return `${sym}: Error`; }
+        }));
+        return message.reply(lines.join("\n"));
+      } catch (e) {
+        return message.reply(`Error: ${e.message}`);
+      }
+    }
+
+    if (content === "!price" || content.startsWith("!price ")) {
+      try {
+        const parts = message.content.split(/\s+/);
+        const arg = parts[1];
+        const symbols = getSymbols();
+        let sym = getDefaultSymbol();
+        if (arg) {
+          const upper = arg.toUpperCase();
+          sym = symbols.find((s) => s === upper || s.startsWith(upper + "/")) || sym;
+        }
+        const p = await fetchPrice(sym);
         return message.reply(
-          `${getDefaultSymbol()}: ${formatPrice(p.last)} | H: ${formatPrice(p.high)} | L: ${formatPrice(p.low)}`,
+          `${sym}: ${formatPrice(p.last, sym)} | H: ${formatPrice(p.high, sym)} | L: ${formatPrice(p.low, sym)}`,
         );
       } catch (e) {
         return message.reply(`Error: ${e.message}`);
@@ -80,7 +104,7 @@ async function startDiscordBot() {
         [
           `**Bot Status**`,
           `Uptime: ${uptimeFormatted()}`,
-          `Exchange: ${process.env.EXCHANGE || "binance"} (Sandbox: ${process.env.SANDBOX || "true"})`,
+          `Exchange: ${process.env.EXCHANGE || "bitbank"} (Sandbox: ${process.env.SANDBOX || "true"})`,
           `シグナル: BUY ${stats.totalBuy} / SELL ${stats.totalSell}`,
           `最終シグナル: ${lastAt}`,
           `履歴件数: ${stats.historyCount}`,
@@ -97,7 +121,8 @@ async function startDiscordBot() {
       }
       const lines = recent.map((s) => {
         const t = new Date(s.timestamp).toLocaleString("ja-JP");
-        return `${s.side} ${formatPrice(s.price)} (${t})`;
+        const base = getBaseCurrencyForSymbol(s.symbol || getDefaultSymbol());
+        return `[${base}] ${s.side} ${formatPrice(s.price, s.symbol)} (${t})`;
       });
       return message.reply(
         [`**直近シグナル (${recent.length}件)**`, ...lines].join("\n"),
@@ -169,7 +194,7 @@ async function startDiscordBot() {
     try {
       const result = await executeTrade(side, undefined, amount);
       message.reply(
-        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @${formatPrice(result.average)} | ${result.status}`,
+        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @${formatPrice(result.average, result.symbol)} | ${result.status}`,
       );
     } catch (e) {
       message.reply(`❌ ${e.message}`);
