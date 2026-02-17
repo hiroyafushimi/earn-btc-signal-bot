@@ -64,12 +64,13 @@ async function withRetry(fn, label) {
 
 async function initExchange() {
   try {
-    exchange = new ccxt[EXCHANGE]({
+    const ex = new ccxt[EXCHANGE]({
       apiKey: process.env.API_KEY,
       secret: process.env.API_SECRET,
       sandbox: process.env.SANDBOX === "true",
     });
-    await exchange.loadMarkets();
+    await ex.loadMarkets();
+    exchange = ex;
     log(MOD, `${EXCHANGE} loaded. Sandbox: ${exchange.sandbox}`);
     return exchange;
   } catch (e) {

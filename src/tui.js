@@ -155,7 +155,7 @@ function startTUI() {
 
   // Listen for new signals
   onSignal((signal) => {
-    addLog(`Signal: ${signal.side} @${formatPrice(signal.price)} (strength: ${signal.strength})`);
+    addLog(`Signal: ${signal.symbol} ${signal.side} @${formatPrice(signal.price, signal.symbol)} (strength: ${signal.strength})`);
   });
 
   addLog("TUI started. q/ESC=quit, 1-8/TAB=timeframe, S=symbol");
