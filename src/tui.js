@@ -136,10 +136,14 @@ function startTUI() {
 
   // S key cycles through symbols
   screen.key(["s"], () => {
+    if (symbols.length <= 1) {
+      addLog("Symbol switching requires TRADE_SYMBOLS in .env (e.g. BTC/JPY,ETH/JPY,XRP/JPY)");
+      return;
+    }
     currentSymbolIdx = (currentSymbolIdx + 1) % symbols.length;
     const sym = symbols[currentSymbolIdx];
     chart.setLabel(` ${sym} Chart [${getTimeframe()}] `);
-    addLog(`Symbol: ${sym}`);
+    addLog(`Symbol: ${sym} (${currentSymbolIdx + 1}/${symbols.length})`);
     refreshAll();
   });
 
