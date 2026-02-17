@@ -1,5 +1,5 @@
 const { Client, Events, GatewayIntentBits } = require("discord.js");
-const { executeTrade, fetchPrice } = require("./exchange");
+const { executeTrade, fetchPrice, getDefaultSymbol, formatPrice } = require("./exchange");
 const { onSignal, onDailySummary, getSignalStats, getRecentSignals } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
@@ -61,9 +61,9 @@ async function startDiscordBot() {
     // !price
     if (content === "!price") {
       try {
-        const p = await fetchPrice("BTC/USDT");
+        const p = await fetchPrice();
         return message.reply(
-          `BTC/USDT: $${p.last.toLocaleString()} | H: $${p.high.toLocaleString()} | L: $${p.low.toLocaleString()}`,
+          `${getDefaultSymbol()}: ${formatPrice(p.last)} | H: ${formatPrice(p.high)} | L: ${formatPrice(p.low)}`,
         );
       } catch (e) {
         return message.reply(`Error: ${e.message}`);
@@ -97,7 +97,7 @@ async function startDiscordBot() {
       }
       const lines = recent.map((s) => {
         const t = new Date(s.timestamp).toLocaleString("ja-JP");
-        return `${s.side} $${s.price.toLocaleString()} (${t})`;
+        return `${s.side} ${formatPrice(s.price)} (${t})`;
       });
       return message.reply(
         [`**直近シグナル (${recent.length}件)**`, ...lines].join("\n"),
@@ -151,9 +151,9 @@ async function startDiscordBot() {
     }
 
     try {
-      const result = await executeTrade(side, "BTC/USDT", amount);
+      const result = await executeTrade(side, undefined, amount);
       message.reply(
-        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @$${result.average} | ${result.status}`,
+        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @${formatPrice(result.average)} | ${result.status}`,
       );
     } catch (e) {
       message.reply(`❌ ${e.message}`);

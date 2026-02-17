@@ -3,9 +3,26 @@ const { log, error } = require("./logger");
 
 const MOD = "Exchange";
 const EXCHANGE = process.env.EXCHANGE || "binance";
+const DEFAULT_SYMBOL = process.env.TRADE_SYMBOL || "BTC/USDT";
 const MAX_RETRIES = 3;
 
 let exchange;
+
+function getDefaultSymbol() {
+  return DEFAULT_SYMBOL;
+}
+
+function getQuoteCurrency() {
+  return DEFAULT_SYMBOL.split("/")[1] || "USDT";
+}
+
+function formatPrice(value) {
+  const quote = getQuoteCurrency();
+  if (quote === "JPY") {
+    return `¥${Math.round(value).toLocaleString()}`;
+  }
+  return `$${value.toLocaleString()}`;
+}
 
 async function withRetry(fn, label) {
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -40,7 +57,7 @@ function getExchange() {
   return exchange;
 }
 
-async function fetchPrice(symbol = "BTC/USDT") {
+async function fetchPrice(symbol = DEFAULT_SYMBOL) {
   if (!exchange) throw new Error("Exchange not ready");
   return withRetry(async () => {
     const ticker = await exchange.fetchTicker(symbol);
@@ -55,7 +72,7 @@ async function fetchPrice(symbol = "BTC/USDT") {
   }, `fetchPrice(${symbol})`);
 }
 
-async function executeTrade(side, symbol = "BTC/USDT", amount) {
+async function executeTrade(side, symbol = DEFAULT_SYMBOL, amount) {
   if (!exchange) throw new Error("Exchange not ready");
 
   const riskPct = parseFloat(process.env.RISK_PCT || "0");
@@ -69,12 +86,13 @@ async function executeTrade(side, symbol = "BTC/USDT", amount) {
       () => exchange.fetchBalance(),
       "fetchBalance",
     );
-    const usdtFree = balance.free.USDT || 0;
+    const quoteCurrency = getQuoteCurrency();
+    const quoteFree = balance.free[quoteCurrency] || 0;
     const ticker = await withRetry(
       () => exchange.fetchTicker(symbol),
       "fetchTicker",
     );
-    qty = (usdtFree * riskPct) / ticker.last;
+    qty = (quoteFree * riskPct) / ticker.last;
   }
 
   const order = await withRetry(
@@ -95,7 +113,7 @@ async function executeTrade(side, symbol = "BTC/USDT", amount) {
   };
 }
 
-async function fetchOHLCV(symbol = "BTC/USDT", timeframe = "1h", limit = 50) {
+async function fetchOHLCV(symbol = DEFAULT_SYMBOL, timeframe = "1h", limit = 50) {
   if (!exchange) throw new Error("Exchange not ready");
   return withRetry(async () => {
     const candles = await exchange.fetchOHLCV(symbol, timeframe, undefined, limit);
@@ -110,4 +128,4 @@ async function fetchOHLCV(symbol = "BTC/USDT", timeframe = "1h", limit = 50) {
   }, `fetchOHLCV(${symbol},${timeframe})`);
 }
 
-module.exports = { initExchange, getExchange, fetchPrice, fetchOHLCV, executeTrade };
+module.exports = { initExchange, getExchange, fetchPrice, fetchOHLCV, executeTrade, getDefaultSymbol, getQuoteCurrency, formatPrice };

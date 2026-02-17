@@ -76,6 +76,7 @@ TELEGRAM_CHANNEL_ID=your_channel_id
 
 # Binance
 EXCHANGE=binance
+TRADE_SYMBOL=BTC/JPY  # or BTC/USDT
 API_KEY=your_key
 API_SECRET=your_secret
 SANDBOX=true
@@ -119,7 +120,7 @@ docker run -d --env-file .env -p 3000:3000 btc-signal-bot
 | コマンド | 説明 |
 |----------|------|
 | `!ping` | 疎通確認 |
-| `!price` | BTC/USDT 現在価格 |
+| `!price` | BTC 現在価格 |
 | `!status` | Bot ステータス |
 | `!history` | 直近シグナル (5件) |
 | `!subscribe` | サブスク登録 ($5/月) |
@@ -130,7 +131,7 @@ docker run -d --env-file .env -p 3000:3000 btc-signal-bot
 | コマンド | 説明 |
 |----------|------|
 | `/start` | ウェルカム |
-| `/price` | BTC/USDT 現在価格 |
+| `/price` | BTC 現在価格 |
 | `/status` | Bot ステータス |
 | `/history` | 直近シグナル (5件) |
 | `/subscribe` | サブスク登録 ($5/月) |
@@ -144,8 +145,8 @@ docker run -d --env-file .env -p 3000:3000 btc-signal-bot
 #BTCto70k シグナル
 
 方向: BUY
-通貨: BTC/USDT
-価格: $68,302
+通貨: BTC/JPY
+価格: ¥10,200,000
 ターゲット: $70,351
 ストップロス: $66,936
 リスク: 1%

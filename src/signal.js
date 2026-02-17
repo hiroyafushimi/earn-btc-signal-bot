@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { fetchPrice, fetchOHLCV } = require("./exchange");
+const { fetchPrice, fetchOHLCV, getDefaultSymbol, formatPrice } = require("./exchange");
 const { log, error } = require("./logger");
 const { analyzeIndicators, sma, rsi } = require("./indicators");
 
@@ -74,18 +74,9 @@ function onDailySummary(callback) {
 }
 
 function formatSignal(signal) {
-  const price = signal.price.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-  });
-  const target = signal.target.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-  });
-  const sl = signal.stopLoss.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-  });
+  const price = formatPrice(signal.price);
+  const target = formatPrice(signal.target);
+  const sl = formatPrice(signal.stopLoss);
 
   const lines = [
     `#BTCto70k シグナル`,
@@ -122,7 +113,7 @@ function analyze(priceObjs) {
 
   return {
     side: result.side,
-    symbol: "BTC/USDT",
+    symbol: getDefaultSymbol(),
     price: current,
     target: Math.round(current * (isBuy ? 1.03 : 0.97)),
     stopLoss: Math.round(current * (isBuy ? 0.98 : 1.02)),
@@ -141,7 +132,7 @@ function isCooldownActive(side) {
 
 async function emitSignal(signal) {
   const message = formatSignal(signal);
-  log(MOD, `Signal: ${signal.side} @$${signal.price}`);
+  log(MOD, `Signal: ${signal.side} @${formatPrice(signal.price)}`);
 
   lastSignalTime[signal.side] = Date.now();
   lastSignalAt = Date.now();
@@ -161,7 +152,7 @@ async function emitSignal(signal) {
 
 async function tick() {
   try {
-    const price = await fetchPrice("BTC/USDT");
+    const price = await fetchPrice();
     priceHistory.push(price);
 
     if (priceHistory.length > 100) {
@@ -175,9 +166,9 @@ async function tick() {
     const rsiStr = currentRsi !== null ? ` RSI:${currentRsi.toFixed(1)}` : "";
     const smaStr =
       sma5 && sma20
-        ? ` SMA5:$${Math.round(sma5)} SMA20:$${Math.round(sma20)}`
+        ? ` SMA5:${formatPrice(sma5)} SMA20:${formatPrice(sma20)}`
         : "";
-    log(MOD, `BTC/USDT: $${price.last}${rsiStr}${smaStr}`);
+    log(MOD, `${getDefaultSymbol()}: ${formatPrice(price.last)}${rsiStr}${smaStr}`);
 
     const signal = analyze(priceHistory);
     if (signal) {
@@ -188,7 +179,7 @@ async function tick() {
 
       // 複数時間足で確認 (1h ローソク足)
       try {
-        const candles1h = await fetchOHLCV("BTC/USDT", "1h", 30);
+        const candles1h = await fetchOHLCV(getDefaultSymbol(), "1h", 30);
         if (candles1h.length >= 21) {
           const closes1h = candles1h.map((c) => c.close);
           const htfResult = analyzeIndicators(closes1h);
@@ -223,9 +214,9 @@ async function emitDailySummary() {
   const summary = [
     `#BTCto70k 日次サマリー`,
     ``,
-    `BTC/USDT: $${current.toLocaleString()}`,
-    `24h High: $${high.toLocaleString()}`,
-    `24h Low: $${low.toLocaleString()}`,
+    `${getDefaultSymbol()}: ${formatPrice(current)}`,
+    `24h High: ${formatPrice(high)}`,
+    `24h Low: ${formatPrice(low)}`,
     ``,
     `シグナル数: ${todaySignals.length}`,
     `  BUY: ${todaySignals.filter((s) => s.side === "BUY").length}`,

@@ -211,7 +211,7 @@ docker run -d \
 **正常時のログパターン:**
 
 ```
-[HH:MM:SS] [Signal] BTC/USDT: $68302 RSI:45.2 SMA5:$68100 SMA20:$67900
+[HH:MM:SS] [Signal] BTC/JPY: ¥10,200,000 RSI:45.2 SMA5:¥10,150,000 SMA20:¥10,100,000
 ```
 
 1分ごとに出力される。RSI / SMA 値でシグナルの状態を確認できる。
@@ -225,7 +225,7 @@ docker run -d \
 **異常時のログパターン:**
 
 ```
-[HH:MM:SS] [Exchange] ERROR fetchPrice(BTC/USDT) attempt 1 failed: XXXX, retry in 1000ms
+[HH:MM:SS] [Exchange] ERROR fetchPrice(BTC/JPY) attempt 1 failed: XXXX, retry in 1000ms
 [HH:MM:SS] [Signal] ERROR tick error: XXXX
 ```
 
@@ -377,6 +377,7 @@ docker run -d --env-file .env -p 3000:3000 --name btc-signal-bot --restart unles
 ```bash
 # 1. .env を編集
 SANDBOX=false
+TRADE_SYMBOL=BTC/JPY  # バイナンスジャパンの場合
 API_KEY=本番キー
 API_SECRET=本番シークレット
 STRIPE_SECRET_KEY=sk_live_xxx
@@ -435,7 +436,7 @@ pm2 restart btc-signal-bot
 ### シグナルが出ない
 
 1. 起動後 21分以上経過しているか確認
-2. ログに `BTC/USDT: $XXXXX RSI:XX.X` が出ているか確認
+2. ログに `BTC/JPY: ¥XXXXXXX RSI:XX.X` が出ているか確認 (TRADE_SYMBOL に応じて通貨が変わる)
 3. `SIGNAL_COOLDOWN` の間隔内でないか確認
 4. テクニカル条件 (RSI < 40 or > 60, SMA クロス等) が揃っていない場合は正常
 

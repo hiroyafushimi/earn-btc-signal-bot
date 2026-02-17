@@ -26,7 +26,7 @@ npm start
 [HH:MM:SS] [Signal] Monitor started (interval: 60000ms, cooldown: 300000ms)
 [HH:MM:SS] [Main] Server: http://localhost:3000 (health, webhook, subscribe)
 [HH:MM:SS] [Main] btc-signal-bot ready! #BTCto70k
-[HH:MM:SS] [Signal] BTC/USDT: $XXXXX
+[HH:MM:SS] [Signal] BTC/JPY: ¥X,XXX,XXX
 ```
 
 **確認ポイント:**
@@ -105,7 +105,7 @@ Bot が起動している状態で Discord のサーバーチャンネルから�
 ### 1-2. !price
 
 **入力:** `!price`
-**期待応答:** `BTC/USDT: $XX,XXX | H: $XX,XXX | L: $XX,XXX`
+**期待応答:** `BTC/JPY: ¥X,XXX,XXX | H: ¥X,XXX,XXX | L: ¥X,XXX,XXX` (TRADE_SYMBOL に応じて通貨が変わる)
 
 **確認ポイント:**
 
@@ -142,7 +142,7 @@ Exchange: binance (Sandbox: true)
 **前提:** `.env` の `ADMIN_DISCORD_IDS` に自分の Discord ユーザー ID を設定。
 
 **入力:** `!trade buy`
-**期待応答:** `✅ BUY BTC/USDT | ID: XXXXX | qty: 0.001 filled: 0.001 @$XXXXX | closed`
+**期待応答:** `✅ BUY BTC/JPY | ID: XXXXX | qty: 0.001 filled: 0.001 @¥XXXXXXX | closed`
 
 **確認ポイント:**
 
@@ -152,7 +152,7 @@ Exchange: binance (Sandbox: true)
 ### 1-7. !trade sell (管理者)
 
 **入力:** `!trade sell`
-**期待応答:** `✅ SELL BTC/USDT | ID: XXXXX | ...`
+**期待応答:** `✅ SELL BTC/JPY | ID: XXXXX | ...`
 
 ### 1-8. トレード権限制限
 
@@ -190,7 +190,7 @@ Exchange: binance (Sandbox: true)
 ### 2-2. /price
 
 **入力:** `/price`
-**期待応答:** BTC/USDT の価格 + 高値/安値/出来高
+**期待応答:** BTC/JPY の価格 + 高値/安値/出来高 (TRADE_SYMBOL に応じて通貨が変わる)
 
 ### 2-3. /status
 
@@ -225,7 +225,7 @@ Exchange: binance (Sandbox: true)
 
 **確認ポイント:**
 
-- [ ] 1分ごとに `[Signal] BTC/USDT: $XXXXX RSI:XX.X SMA5:$XXXXX SMA20:$XXXXX` がログに出るか
+- [ ] 1分ごとに `[Signal] BTC/JPY: ¥X,XXX,XXX RSI:XX.X SMA5:¥X,XXX,XXX SMA20:¥X,XXX,XXX` がログに出るか
 - [ ] 21 tick 以降、条件を満たすとシグナルが発行されるか
 
 ### 3-2. シグナル発火の加速テスト (任意)
@@ -357,7 +357,7 @@ Discord / Telegram の両方のトークンを未設定にして起動。
 `.env` で `ADMIN_DISCORD_IDS=` (空) にして起動。
 
 **入力:** `!trade buy`
-**期待応答:** `✅ BUY BTC/USDT | ...` (空 = 全員許可)
+**期待応答:** `✅ BUY BTC/JPY | ...` (空 = 全員許可)
 
 ---
 

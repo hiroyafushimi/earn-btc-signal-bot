@@ -90,7 +90,7 @@ index.js (Express /health + graceful shutdown)
 | コマンド | 説明 |
 |----------|------|
 | `!ping` | 疎通確認 |
-| `!price` | BTC/USDT 現在価格 |
+| `!price` | BTC 現在価格 (TRADE_SYMBOL に応じた通貨ペア) |
 | `!status` | Bot ステータス (uptime, シグナル数, 最終シグナル) |
 | `!history` | 直近シグナル一覧 (最大5件) |
 | `!subscribe` | サブスク登録 ($5/月 Stripe) |
@@ -101,7 +101,7 @@ index.js (Express /health + graceful shutdown)
 | コマンド | 説明 |
 |----------|------|
 | `/start` | ウェルカムメッセージ |
-| `/price` | BTC/USDT 現在価格 |
+| `/price` | BTC 現在価格 (TRADE_SYMBOL に応じた通貨ペア) |
 | `/status` | Bot ステータス (uptime, シグナル数, 最終シグナル) |
 | `/history` | 直近シグナル一覧 (最大5件) |
 | `/subscribe` | サブスク登録 ($5/月) |
@@ -115,8 +115,8 @@ index.js (Express /health + graceful shutdown)
 #BTCto70k シグナル
 
 方向: BUY
-通貨: BTC/USDT
-価格: $XX,XXX
+通貨: BTC/JPY
+価格: ¥X,XXX,XXX
 ターゲット: $XX,XXX
 ストップロス: $XX,XXX
 リスク: X%
@@ -161,6 +161,7 @@ YYYY-MM-DDTHH:MM:SS.sssZ
 | TELEGRAM_BOT_TOKEN | No | Telegram Bot トークン (設定時のみTelegram有効) |
 | TELEGRAM_CHANNEL_ID | No | Telegram シグナル配信チャンネル ID |
 | EXCHANGE | Yes | 取引所 (binance) |
+| TRADE_SYMBOL | No | 取引通貨ペア (default: BTC/USDT、バイナンスジャパンは BTC/JPY) |
 | API_KEY | Yes | Binance API キー |
 | API_SECRET | Yes | Binance API シークレット |
 | SANDBOX | No | true でテストネット (default: true) |

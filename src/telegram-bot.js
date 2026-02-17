@@ -1,5 +1,5 @@
 const { Bot } = require("grammy");
-const { fetchPrice, executeTrade } = require("./exchange");
+const { fetchPrice, executeTrade, getDefaultSymbol, formatPrice } = require("./exchange");
 const { onSignal, onDailySummary, getSignalStats, getRecentSignals } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
@@ -61,13 +61,13 @@ async function startTelegramBot() {
   // /price
   bot.command("price", async (ctx) => {
     try {
-      const p = await fetchPrice("BTC/USDT");
+      const p = await fetchPrice();
       await ctx.reply(
         [
-          `BTC/USDT`,
-          `価格: $${p.last.toLocaleString()}`,
-          `高値: $${p.high.toLocaleString()}`,
-          `安値: $${p.low.toLocaleString()}`,
+          getDefaultSymbol(),
+          `価格: ${formatPrice(p.last)}`,
+          `高値: ${formatPrice(p.high)}`,
+          `安値: ${formatPrice(p.low)}`,
           `出来高: ${p.volume.toFixed(2)} BTC`,
         ].join("\n"),
       );
@@ -103,7 +103,7 @@ async function startTelegramBot() {
     }
     const lines = recent.map((s) => {
       const t = new Date(s.timestamp).toLocaleString("ja-JP");
-      return `${s.side} $${s.price.toLocaleString()} (${t})`;
+      return `${s.side} ${formatPrice(s.price)} (${t})`;
     });
     await ctx.reply(
       [`直近シグナル (${recent.length}件)`, ...lines].join("\n"),
@@ -142,7 +142,7 @@ async function startTelegramBot() {
         "btc-signal-bot ヘルプ",
         "",
         "/start - ウェルカムメッセージ",
-        "/price - BTC/USDT 現在価格",
+        `/price - ${getDefaultSymbol()} 現在価格`,
         "/status - Bot ステータス",
         "/history - 直近シグナル",
         "/subscribe - サブスク登録",
@@ -173,9 +173,9 @@ async function startTelegramBot() {
     const amount = parseFloat(process.env.PROCESSING_AMOUNT || "0.001");
 
     try {
-      const result = await executeTrade(side, "BTC/USDT", amount);
+      const result = await executeTrade(side, undefined, amount);
       await ctx.reply(
-        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @$${result.average} | ${result.status}`,
+        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @${formatPrice(result.average)} | ${result.status}`,
       );
     } catch (e) {
       await ctx.reply(`❌ ${e.message}`);
