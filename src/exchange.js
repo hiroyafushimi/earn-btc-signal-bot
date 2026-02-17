@@ -3,14 +3,34 @@ const { log, error } = require("./logger");
 
 const MOD = "Exchange";
 const EXCHANGE = process.env.EXCHANGE || "bitbank";
-const DEFAULT_SYMBOL = process.env.TRADE_SYMBOL || "BTC/JPY";
 const MAX_RETRIES = 3;
+
+// Validate symbol format: must be "BASE/QUOTE" (e.g. BTC/JPY)
+function isValidSymbol(s) {
+  return /^[A-Z0-9]{2,10}\/[A-Z]{3,5}$/.test(s);
+}
+
+const DEFAULT_SYMBOL = (() => {
+  const raw = (process.env.TRADE_SYMBOL || "BTC/JPY").trim();
+  if (!isValidSymbol(raw)) {
+    error(MOD, `Invalid TRADE_SYMBOL: "${raw}" - must be BASE/QUOTE format (e.g. BTC/JPY). Using BTC/JPY`);
+    return "BTC/JPY";
+  }
+  return raw;
+})();
 
 // Multi-symbol support: TRADE_SYMBOLS (comma-separated) or fallback to TRADE_SYMBOL
 const SYMBOLS = (() => {
   const multi = (process.env.TRADE_SYMBOLS || "").trim();
   if (multi) {
-    return multi.split(",").map((s) => s.trim()).filter(Boolean);
+    const parsed = multi.split(",").map((s) => s.trim()).filter(Boolean);
+    const valid = parsed.filter((s) => {
+      if (isValidSymbol(s)) return true;
+      error(MOD, `Invalid symbol skipped: "${s}" - must be BASE/QUOTE format (e.g. BTC/JPY)`);
+      return false;
+    });
+    if (valid.length > 0) return valid;
+    error(MOD, "No valid symbols in TRADE_SYMBOLS, falling back to TRADE_SYMBOL");
   }
   return [DEFAULT_SYMBOL];
 })();
