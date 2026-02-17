@@ -2,8 +2,8 @@ const ccxt = require("ccxt");
 const { log, error } = require("./logger");
 
 const MOD = "Exchange";
-const EXCHANGE = process.env.EXCHANGE || "binance";
-const DEFAULT_SYMBOL = process.env.TRADE_SYMBOL || "BTC/USDT";
+const EXCHANGE = process.env.EXCHANGE || "bitbank";
+const DEFAULT_SYMBOL = process.env.TRADE_SYMBOL || "BTC/JPY";
 const MAX_RETRIES = 3;
 
 // Multi-symbol support: TRADE_SYMBOLS (comma-separated) or fallback to TRADE_SYMBOL
