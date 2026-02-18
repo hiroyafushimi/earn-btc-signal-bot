@@ -2,6 +2,7 @@ const { Client, Events, GatewayIntentBits } = require("discord.js");
 const { onSignal, onDailySummary } = require("./signal");
 const { log, error } = require("./logger");
 const { checkLimit } = require("./rate-limit");
+const { getDefaultSymbol, getTradeAmount } = require("./exchange");
 const {
   handlePrices, handlePrice, handleStatus, handleBalance,
   handleHistory, handleTimeframe, handleSubscribe, handleTrade,
@@ -121,8 +122,7 @@ async function startDiscordBot() {
           return message.reply("⛔ トレード権限がありません");
         }
         const { side, symbol } = intent;
-        const { getTradeAmount } = require("./exchange");
-        const sym = symbol || require("./exchange").getDefaultSymbol();
+        const sym = symbol || getDefaultSymbol();
         return message.reply(await handleTrade(side, sym, getTradeAmount(sym)));
       }
     } catch (e) {
