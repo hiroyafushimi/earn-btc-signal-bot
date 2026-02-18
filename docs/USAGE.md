@@ -55,6 +55,7 @@ npm start -- --tui
 | `!history` | 直近シグナル一覧 (最大5件) |
 | `!timeframe [tf]` | タイムフレーム変更 (例: `!timeframe 1h`) |
 | `!subscribe` | サブスク登録 ($5/月、Stripe 決済リンク発行) |
+| `!balance` | 資産状況 (管理者のみ) |
 | `!trade buy [通貨] [数量]` | 買い注文 (管理者のみ) |
 | `!trade sell [通貨] [数量]` | 売り注文 (管理者のみ) |
 
@@ -97,6 +98,7 @@ npm start -- --tui
 | `/price [通貨]` | 価格表示 (例: `/price ETH`) |
 | `/prices` | 全通貨の価格一覧 |
 | `/trade buy/sell [通貨] [数量]` | トレード実行 (管理者のみ、例: `/trade buy ETH 0.5`) |
+| `/balance` | 資産状況 (管理者のみ) |
 | `/status` | Bot ステータス (uptime, シグナル数, サブスクライバー数) |
 | `/history` | 直近シグナル一覧 (最大5件) |
 | `/timeframe [tf]` | タイムフレーム変更 (例: `/timeframe 1h`) |

@@ -1,5 +1,5 @@
 const { Bot } = require("grammy");
-const { fetchPrice, executeTrade, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol, resolveSymbol, getTradeAmount } = require("./exchange");
+const { fetchPrice, fetchBalance, executeTrade, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol, resolveSymbol, getTradeAmount } = require("./exchange");
 const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes, getActiveSymbols } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
@@ -54,6 +54,7 @@ async function startTelegramBot() {
         "/price [通貨] - 現在価格 (例: /price ETH)",
         "/prices - 全通貨の価格一覧",
         "/trade buy|sell [通貨] [数量] - トレード実行",
+        "/balance - 資産状況",
         "/status - Bot ステータス",
         "/history - 直近シグナル",
         "/timeframe [tf] - タイムフレーム変更",
@@ -142,6 +143,27 @@ async function startTelegramBot() {
     );
   });
 
+  // /balance
+  bot.command("balance", async (ctx) => {
+    if (!isAdmin(ctx.from.id)) {
+      return ctx.reply("⛔ 残高確認の権限がありません");
+    }
+    try {
+      const balances = await fetchBalance();
+      if (balances.length === 0) {
+        return ctx.reply("残高情報がありません");
+      }
+      const lines = balances.map((b) =>
+        `${b.currency}: ${b.free} (利用可能) / ${b.used} (注文中) / ${b.total} (合計)`,
+      );
+      await ctx.reply(
+        ["資産状況", "", ...lines].join("\n"),
+      );
+    } catch (e) {
+      await ctx.reply(`Error: ${e.message}`);
+    }
+  });
+
   // /subscribe
   bot.command("subscribe", async (ctx) => {
     if (!stripeEnabled()) {
@@ -222,6 +244,7 @@ async function startTelegramBot() {
         "/prices - 全通貨の価格一覧",
         "/trade buy|sell [通貨] [数量] - トレード実行",
         "  例: /trade buy ETH 0.5",
+        "/balance - 資産状況",
         "/status - Bot ステータス",
         "/history - 直近シグナル",
         "/timeframe [tf] - タイムフレーム変更",

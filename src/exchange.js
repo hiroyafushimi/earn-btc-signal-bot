@@ -197,6 +197,30 @@ async function executeTrade(side, symbol = DEFAULT_SYMBOL, amount) {
   };
 }
 
+async function fetchBalance() {
+  if (!exchange) throw new Error("Exchange not ready");
+  const raw = await withRetry(() => exchange.fetchBalance(), "fetchBalance");
+
+  // Collect currencies relevant to monitored symbols
+  const currencies = new Set();
+  for (const sym of SYMBOLS) {
+    currencies.add(getBaseCurrencyForSymbol(sym));
+    currencies.add(getQuoteCurrencyForSymbol(sym));
+  }
+
+  const balances = [];
+  for (const cur of currencies) {
+    const free = raw.free[cur] || 0;
+    const used = raw.used[cur] || 0;
+    const total = raw.total[cur] || 0;
+    if (total > 0 || free > 0 || used > 0) {
+      balances.push({ currency: cur, free, used, total });
+    }
+  }
+
+  return balances;
+}
+
 async function fetchOHLCV(symbol = DEFAULT_SYMBOL, timeframe = "1h", limit = 50) {
   if (!exchange) throw new Error("Exchange not ready");
   return withRetry(async () => {
@@ -212,4 +236,4 @@ async function fetchOHLCV(symbol = DEFAULT_SYMBOL, timeframe = "1h", limit = 50)
   }, `fetchOHLCV(${symbol},${timeframe})`);
 }
 
-module.exports = { initExchange, getExchange, fetchPrice, fetchOHLCV, executeTrade, getDefaultSymbol, getSymbols, getQuoteCurrency, getQuoteCurrencyForSymbol, getBaseCurrencyForSymbol, formatPrice, resolveSymbol, getTradeAmount };
+module.exports = { initExchange, getExchange, fetchPrice, fetchBalance, fetchOHLCV, executeTrade, getDefaultSymbol, getSymbols, getQuoteCurrency, getQuoteCurrencyForSymbol, getBaseCurrencyForSymbol, formatPrice, resolveSymbol, getTradeAmount };
