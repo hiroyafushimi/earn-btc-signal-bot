@@ -40,8 +40,8 @@ index.js (Express /health + graceful shutdown)
 | `src/indicators.js` | テクニカル分析指標 (SMA, RSI, SMAクロスオーバー, 総合スコア判定) |
 | `src/signal.js` | マルチ通貨ペア価格監視 → 指標分析 → 複数時間足確認 → シグナル生成 → 自動トレード → クールダウン → 履歴保存 → 日次サマリー |
 | `src/tui.js` | TUI ダッシュボード (blessed-contrib)。リアルタイムチャート・SMA・RSI・シグナル履歴・ログ表示。タイムフレーム/シンボル切替 |
-| `src/discord-bot.js` | Discord Bot (!trade [通貨] [数量], !price, !prices, !status, !history, !subscribe) + キーワード検出 + シグナル/サマリー自動配信 |
-| `src/telegram-bot.js` | Telegram Bot (/trade, /price, /prices, /status, /history, /subscribe) + キーワード検出 + シグナル/サマリー自動配信 |
+| `src/discord-bot.js` | Discord Bot (!trade [通貨] [数量], !price, !prices, !balance, !status, !history, !subscribe) + キーワード検出 + シグナル/サマリー自動配信 |
+| `src/telegram-bot.js` | Telegram Bot (/trade, /price, /prices, /balance, /status, /history, /subscribe) + キーワード検出 + シグナル/サマリー自動配信 |
 | `src/subscription.js` | Stripe Checkout Session 生成 + Webhook 処理 + ユーザー管理 (JSON) |
 | `src/rate-limit.js` | コマンドレート制限 (ユーザー単位、Window/Max 設定可) |
 
@@ -75,8 +75,8 @@ index.js (Express /health + graceful shutdown)
 ### トレード権限制限
 
 - `ADMIN_DISCORD_IDS` / `ADMIN_TELEGRAM_IDS` にユーザー ID をカンマ区切りで設定
-- 設定時: 指定ユーザーのみトレード実行可能
-- 未設定 (空): 全ユーザーがトレード実行可能
+- 設定時: 指定ユーザーのみトレード・残高確認が実行可能
+- 未設定 (空): 全ユーザーがトレード・残高確認が実行可能
 - シグナル閲覧 (!price, /price 等) は全ユーザーに開放
 
 ### Telegram トークン検証
@@ -93,6 +93,7 @@ index.js (Express /health + graceful shutdown)
 | `!ping` | 疎通確認 |
 | `!price [通貨]` | 価格表示 (例: `!price ETH`) |
 | `!prices` | 全通貨の価格一覧 |
+| `!balance` | 資産状況 (管理者のみ) |
 | `!status` | Bot ステータス (uptime, シグナル数, 最終シグナル) |
 | `!history` | 直近シグナル一覧 (最大5件) |
 | `!timeframe [tf]` | タイムフレーム変更 (例: `!timeframe 1h`) |
@@ -107,6 +108,7 @@ index.js (Express /health + graceful shutdown)
 | `/price [通貨]` | 価格表示 (例: `/price ETH`) |
 | `/prices` | 全通貨の価格一覧 |
 | `/trade buy/sell [通貨] [数量]` | トレード実行 (管理者のみ、例: `/trade buy ETH 0.5`) |
+| `/balance` | 資産状況 (管理者のみ) |
 | `/status` | Bot ステータス (uptime, シグナル数, 最終シグナル) |
 | `/history` | 直近シグナル一覧 (最大5件) |
 | `/timeframe [tf]` | タイムフレーム変更 (例: `/timeframe 1h`) |

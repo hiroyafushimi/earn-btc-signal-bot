@@ -137,7 +137,26 @@ Exchange: binance (Sandbox: true)
 **入力:** `!subscribe`
 **期待応答:** `サブスクリプション: $5/月\n決済連携は準備中です。`
 
-### 1-6. !trade buy (管理者・デフォルト通貨)
+### 1-6. !balance (管理者)
+
+**前提:** `.env` の `ADMIN_DISCORD_IDS` に自分の Discord ユーザー ID を設定。API_KEY / API_SECRET が有効であること。
+
+**入力:** `!balance`
+**期待応答:**
+
+```
+**資産状況**
+BTC: 0.05 (利用可能) / 0 (注文中) / 0.05 (合計)
+JPY: 500000 (利用可能) / 0 (注文中) / 500000 (合計)
+```
+
+**確認ポイント:**
+
+- [ ] 監視通貨に関連する通貨のみ表示されるか
+- [ ] 管理者以外が実行した場合 `⛔ 残高確認の権限がありません` が返るか
+- [ ] API キー未設定時に `Error:` メッセージが返るか
+
+### 1-7. !trade buy (管理者・デフォルト通貨)
 
 **前提:** `.env` の `ADMIN_DISCORD_IDS` に自分の Discord ユーザー ID を設定。
 
@@ -231,7 +250,12 @@ Exchange: binance (Sandbox: true)
 **入力:** `/history`
 **期待応答:** `シグナル履歴なし` または直近シグナル一覧
 
-### 2-5. /subscribe
+### 2-5. /balance
+
+**入力:** `/balance`
+**期待応答:** 資産状況 (Discord の `!balance` と同様のフォーマット)
+
+### 2-6. /subscribe
 
 **入力:** `/subscribe`
 **期待応答:** `サブスクリプション: $5/月` + 決済準備中メッセージ (Stripe 未設定時)
@@ -456,14 +480,16 @@ Discord / Telegram の両方のトークンを未設定にして起動。
 | 1-3 | !status | |
 | 1-4 | !history | |
 | 1-5 | !subscribe | |
-| 1-6 | !trade buy (デフォルト通貨) | |
-| 1-7 | !trade buy ETH (通貨指定) | |
+| 1-6 | !balance (管理者) | |
+| 1-7 | !trade buy (デフォルト通貨) | |
+| 1-8 | !trade buy ETH (通貨指定) | |
 | 1-8 | !trade sell XRP 100 (通貨+数量) | |
 | 1-9 | !trade buy 0.5 (数量のみ) | |
 | 1-10 | トレード権限制限 | |
 | 1-11 | キーワード + 通貨名検出 | |
 | 1-12 | 大文字コマンド | |
 | 1-13 | レート制限 | |
+| 2-5 | /balance (Telegram) | |
 | 2-7 | /trade buy ETH (Telegram) | |
 | 2-8 | /trade 引数なし (Telegram) | |
 | 2-9 | テキストトレード + 通貨検出 (Telegram) | |
