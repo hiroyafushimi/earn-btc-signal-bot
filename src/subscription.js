@@ -1,4 +1,5 @@
 const fs = require("fs");
+const fsp = fs.promises;
 const path = require("path");
 const { log, error } = require("./logger");
 
@@ -23,58 +24,62 @@ function isEnabled() {
   return !!stripe;
 }
 
-// --- User storage ---
+// --- User storage (async) ---
 
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-function loadSubscribers() {
-  ensureDataDir();
+async function ensureDataDir() {
   try {
-    if (fs.existsSync(USERS_FILE)) {
-      return JSON.parse(fs.readFileSync(USERS_FILE, "utf-8"));
-    }
+    await fsp.mkdir(DATA_DIR, { recursive: true });
   } catch (e) {
-    error(MOD, "Failed to load subscribers:", e.message);
+    if (e.code !== "EEXIST") throw e;
   }
-  return {};
 }
 
-function saveSubscribers(data) {
-  ensureDataDir();
+async function loadSubscribers() {
+  await ensureDataDir();
   try {
-    fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2));
+    const data = await fsp.readFile(USERS_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch (e) {
+    if (e.code === "ENOENT") return {};
+    error(MOD, "Failed to load subscribers:", e.message);
+    return {};
+  }
+}
+
+async function saveSubscribers(data) {
+  await ensureDataDir();
+  try {
+    const tmpFile = USERS_FILE + ".tmp";
+    await fsp.writeFile(tmpFile, JSON.stringify(data, null, 2));
+    await fsp.rename(tmpFile, USERS_FILE);
   } catch (e) {
     error(MOD, "Failed to save subscribers:", e.message);
   }
 }
 
-function getSubscriber(platform, userId) {
-  const subs = loadSubscribers();
+async function getSubscriber(platform, userId) {
+  const subs = await loadSubscribers();
   const key = `${platform}:${userId}`;
   return subs[key] || null;
 }
 
-function setSubscriber(platform, userId, data) {
-  const subs = loadSubscribers();
+async function setSubscriber(platform, userId, data) {
+  const subs = await loadSubscribers();
   const key = `${platform}:${userId}`;
   subs[key] = { ...data, platform, userId, updatedAt: Date.now() };
-  saveSubscribers(subs);
+  await saveSubscribers(subs);
 }
 
-function isSubscribed(platform, userId) {
-  const sub = getSubscriber(platform, userId);
+async function isSubscribed(platform, userId) {
+  const sub = await getSubscriber(platform, userId);
   if (!sub) return false;
   if (sub.status !== "active") return false;
   if (sub.expiresAt && sub.expiresAt < Date.now()) return false;
   return true;
 }
 
-function getSubscriberCount() {
-  const subs = loadSubscribers();
+async function getSubscriberCount() {
+  const subs = await loadSubscribers();
   return Object.values(subs).filter(
     (s) => s.status === "active" && (!s.expiresAt || s.expiresAt > Date.now()),
   ).length;
@@ -138,7 +143,7 @@ async function handleWebhook(rawBody, signature) {
       const session = event.data.object;
       const { platform, userId, username } = session.metadata || {};
       if (platform && userId) {
-        setSubscriber(platform, userId, {
+        await setSubscriber(platform, userId, {
           status: "active",
           username,
           stripeCustomerId: session.customer,
@@ -154,7 +159,7 @@ async function handleWebhook(rawBody, signature) {
     case "customer.subscription.deleted":
     case "customer.subscription.updated": {
       const subscription = event.data.object;
-      const subs = loadSubscribers();
+      const subs = await loadSubscribers();
 
       for (const [key, sub] of Object.entries(subs)) {
         if (sub.stripeSubscriptionId === subscription.id) {
@@ -172,7 +177,7 @@ async function handleWebhook(rawBody, signature) {
         }
       }
 
-      saveSubscribers(subs);
+      await saveSubscribers(subs);
       break;
     }
 

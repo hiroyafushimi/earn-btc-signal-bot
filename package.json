@@ -8,7 +8,7 @@
     "start:tui": "node src/index.js --tui",
     "dev": "nodemon src/index.js",
     "dev:tui": "nodemon src/index.js -- --tui",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest"
   },
   "repository": {
     "type": "git",
@@ -31,5 +31,8 @@
     "express": "^5.2.1",
     "grammy": "^1.40.0",
     "stripe": "^20.3.1"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0"
   }
 }
