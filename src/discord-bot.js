@@ -1,5 +1,5 @@
 const { Client, Events, GatewayIntentBits } = require("discord.js");
-const { executeTrade, fetchPrice, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol, resolveSymbol, getTradeAmount } = require("./exchange");
+const { executeTrade, fetchPrice, fetchBalance, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol, resolveSymbol, getTradeAmount } = require("./exchange");
 const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes, getActiveSymbols } = require("./signal");
 const { log, error, uptimeFormatted } = require("./logger");
 const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
@@ -111,6 +111,27 @@ async function startDiscordBot() {
           `サブスクライバー: ${getSubscriberCount()}`,
         ].join("\n"),
       );
+    }
+
+    // !balance
+    if (content === "!balance") {
+      if (!isAdmin(message.author.id)) {
+        return message.reply("⛔ 残高確認の権限がありません");
+      }
+      try {
+        const balances = await fetchBalance();
+        if (balances.length === 0) {
+          return message.reply("残高情報がありません");
+        }
+        const lines = balances.map((b) =>
+          `${b.currency}: ${b.free} (利用可能) / ${b.used} (注文中) / ${b.total} (合計)`,
+        );
+        return message.reply(
+          [`**資産状況**`, ...lines].join("\n"),
+        );
+      } catch (e) {
+        return message.reply(`Error: ${e.message}`);
+      }
     }
 
     // !history
