@@ -1,9 +1,13 @@
 const { Bot } = require("grammy");
-const { fetchPrice, fetchBalance, executeTrade, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol, resolveSymbol, getTradeAmount } = require("./exchange");
-const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes, getActiveSymbols } = require("./signal");
-const { log, error, uptimeFormatted } = require("./logger");
-const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
+const { onSignal, onDailySummary } = require("./signal");
+const { log, error } = require("./logger");
 const { checkLimit } = require("./rate-limit");
+const { getDefaultSymbol, getTradeAmount } = require("./exchange");
+const {
+  handlePrices, handlePrice, handleStatus, handleBalance,
+  handleHistory, handleTimeframe, handleSubscribe, handleHelp,
+  handleTrade, detectTradeIntent, parseTradeArgs,
+} = require("./bot-commands");
 
 const MOD = "Telegram";
 let bot;
@@ -42,40 +46,13 @@ async function startTelegramBot() {
 
   // /start
   bot.command("start", async (ctx) => {
-    const symbols = getSymbols();
-    await ctx.reply(
-      [
-        "crypto-signal-bot #MultiPair",
-        "",
-        `マルチペアシグナル配信ボット (${symbols.length}ペア)`,
-        `監視中: ${symbols.map(s => s.split("/")[0]).join(", ")}`,
-        "",
-        "コマンド:",
-        "/price [通貨] - 現在価格 (例: /price ETH)",
-        "/prices - 全通貨の価格一覧",
-        "/trade buy|sell [通貨] [数量] - トレード実行",
-        "/balance - 資産状況",
-        "/status - Bot ステータス",
-        "/history - 直近シグナル",
-        "/timeframe [tf] - タイムフレーム変更",
-        "/subscribe - サブスク登録 ($5/月)",
-        "/help - ヘルプ",
-      ].join("\n"),
-    );
+    await ctx.reply(handleHelp());
   });
 
-  // /prices (all symbols)
+  // /prices
   bot.command("prices", async (ctx) => {
     try {
-      const symbols = getSymbols();
-      const lines = await Promise.all(symbols.map(async (sym) => {
-        try {
-          const p = await fetchPrice(sym);
-          const base = getBaseCurrencyForSymbol(sym);
-          return `${base}: ${formatPrice(p.last, sym)} (H: ${formatPrice(p.high, sym)} / L: ${formatPrice(p.low, sym)})`;
-        } catch { return `${sym}: Error`; }
-      }));
-      await ctx.reply(["全通貨価格", "", ...lines].join("\n"));
+      await ctx.reply(await handlePrices());
     } catch (e) {
       await ctx.reply(`Error: ${e.message}`);
     }
@@ -84,25 +61,8 @@ async function startTelegramBot() {
   // /price [symbol]
   bot.command("price", async (ctx) => {
     try {
-      const parts = (ctx.message.text || "").split(/\s+/);
-      const arg = parts[1];
-      const symbols = getSymbols();
-      let sym = getDefaultSymbol();
-      if (arg) {
-        const upper = arg.toUpperCase();
-        sym = symbols.find((s) => s === upper || s.startsWith(upper + "/")) || sym;
-      }
-      const p = await fetchPrice(sym);
-      const base = getBaseCurrencyForSymbol(sym);
-      await ctx.reply(
-        [
-          sym,
-          `価格: ${formatPrice(p.last, sym)}`,
-          `高値: ${formatPrice(p.high, sym)}`,
-          `安値: ${formatPrice(p.low, sym)}`,
-          `出来高: ${(p.volume || 0).toFixed(2)} ${base}`,
-        ].join("\n"),
-      );
+      const arg = (ctx.message.text || "").split(/\s+/)[1];
+      await ctx.reply(await handlePrice(arg));
     } catch (e) {
       await ctx.reply(`Error: ${e.message}`);
     }
@@ -110,37 +70,12 @@ async function startTelegramBot() {
 
   // /status
   bot.command("status", async (ctx) => {
-    const stats = getSignalStats();
-    const lastAt = stats.lastSignalAt
-      ? new Date(stats.lastSignalAt).toLocaleString("ja-JP")
-      : "なし";
-    await ctx.reply(
-      [
-        "Bot Status",
-        `Uptime: ${uptimeFormatted()}`,
-        `Exchange: ${process.env.EXCHANGE || "bitbank"} (Sandbox: ${process.env.SANDBOX || "true"})`,
-        `シグナル: BUY ${stats.totalBuy} / SELL ${stats.totalSell}`,
-        `最終シグナル: ${lastAt}`,
-        `履歴件数: ${stats.historyCount}`,
-        `サブスクライバー: ${getSubscriberCount()}`,
-      ].join("\n"),
-    );
+    await ctx.reply(handleStatus());
   });
 
   // /history
   bot.command("history", async (ctx) => {
-    const recent = getRecentSignals(5);
-    if (recent.length === 0) {
-      return ctx.reply("シグナル履歴なし");
-    }
-    const lines = recent.map((s) => {
-      const t = new Date(s.timestamp).toLocaleString("ja-JP");
-      const base = getBaseCurrencyForSymbol(s.symbol || getDefaultSymbol());
-      return `[${base}] ${s.side} ${formatPrice(s.price, s.symbol)} (${t})`;
-    });
-    await ctx.reply(
-      [`直近シグナル (${recent.length}件)`, ...lines].join("\n"),
-    );
+    await ctx.reply(handleHistory());
   });
 
   // /balance
@@ -149,16 +84,7 @@ async function startTelegramBot() {
       return ctx.reply("⛔ 残高確認の権限がありません");
     }
     try {
-      const balances = await fetchBalance();
-      if (balances.length === 0) {
-        return ctx.reply("残高情報がありません");
-      }
-      const lines = balances.map((b) =>
-        `${b.currency}: ${b.free} (利用可能) / ${b.used} (注文中) / ${b.total} (合計)`,
-      );
-      await ctx.reply(
-        ["資産状況", "", ...lines].join("\n"),
-      );
+      await ctx.reply(await handleBalance());
     } catch (e) {
       await ctx.reply(`Error: ${e.message}`);
     }
@@ -166,23 +92,9 @@ async function startTelegramBot() {
 
   // /subscribe
   bot.command("subscribe", async (ctx) => {
-    if (!stripeEnabled()) {
-      return ctx.reply(
-        "サブスクリプション: $5/月\n\n決済連携は準備中です。",
-      );
-    }
-    const sub = isSubscribed("telegram", ctx.from.id);
-    if (sub) {
-      return ctx.reply("✅ サブスク有効です。#BTCto70k");
-    }
     try {
-      const url = await createCheckoutSession(
-        "telegram",
-        ctx.from.id,
-        ctx.from.username || ctx.from.first_name,
-      );
       await ctx.reply(
-        `サブスクリプション: $5/月\n\n決済はこちら:\n${url}`,
+        await handleSubscribe("telegram", ctx.from.id, ctx.from.username || ctx.from.first_name),
       );
     } catch (e) {
       await ctx.reply(`Error: ${e.message}`);
@@ -190,44 +102,22 @@ async function startTelegramBot() {
   });
 
   // /timeframe or /tf
-  bot.command("timeframe", handleTimeframe);
-  bot.command("tf", handleTimeframe);
+  const handleTf = async (ctx) => {
+    const arg = (ctx.message.text || "").split(/\s+/)[1];
+    await ctx.reply(handleTimeframe(arg).text);
+  };
+  bot.command("timeframe", handleTf);
+  bot.command("tf", handleTf);
 
-  async function handleTimeframe(ctx) {
-    const parts = (ctx.message.text || "").split(/\s+/);
-    const arg = parts[1];
-    if (!arg) {
-      return ctx.reply(
-        `現在のタイムフレーム: ${getTimeframe()}\n有効: ${getValidTimeframes().join(", ")}\n使い方: /timeframe 5m`,
-      );
-    }
-    const result = setTimeframe(arg);
-    if (!result.ok) {
-      return ctx.reply(result.error);
-    }
-    return ctx.reply(`タイムフレーム変更: ${result.prev} -> ${result.current}`);
-  }
-
-  // /trade buy [symbol] [amount] or /trade sell ETH 0.5
+  // /trade buy [symbol] [amount]
   bot.command("trade", async (ctx) => {
     if (!isAdmin(ctx.from.id)) {
       return ctx.reply("⛔ トレード権限がありません");
     }
-
-    const parts = (ctx.message.text || "").split(/\s+/);
-    const side = (parts[1] || "").toLowerCase();
-    if (side !== "buy" && side !== "sell") {
-      return ctx.reply("使い方: /trade buy [通貨] [数量]\n例: /trade buy ETH 0.5");
-    }
-
-    const sym = parts[2] ? resolveSymbol(parts[2]) : getDefaultSymbol();
-    const amount = parts[3] ? parseFloat(parts[3]) : getTradeAmount(sym);
-
     try {
-      const result = await executeTrade(side, sym, amount);
-      await ctx.reply(
-        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @${formatPrice(result.average, result.symbol)} | ${result.status}`,
-      );
+      const parts = (ctx.message.text || "").split(/\s+/);
+      const { side, symbol, amount } = parseTradeArgs(parts[1], parts[2], parts[3]);
+      await ctx.reply(await handleTrade(side, symbol, amount));
     } catch (e) {
       await ctx.reply(`❌ ${e.message}`);
     }
@@ -235,61 +125,22 @@ async function startTelegramBot() {
 
   // /help
   bot.command("help", async (ctx) => {
-    const symbols = getSymbols();
-    await ctx.reply(
-      [
-        "crypto-signal-bot ヘルプ",
-        "",
-        `/price [通貨] - 価格 (例: /price ETH)`,
-        "/prices - 全通貨の価格一覧",
-        "/trade buy|sell [通貨] [数量] - トレード実行",
-        "  例: /trade buy ETH 0.5",
-        "/balance - 資産状況",
-        "/status - Bot ステータス",
-        "/history - 直近シグナル",
-        "/timeframe [tf] - タイムフレーム変更",
-        "/subscribe - サブスク登録",
-        "/help - このヘルプ",
-        "",
-        `監視中: ${symbols.map(s => s.split("/")[0]).join(", ")}`,
-      ].join("\n"),
-    );
+    await ctx.reply(handleHelp());
   });
 
-  // Text trade detection - also tries to find a coin name in the message
+  // Text-based trade detection
   bot.on("message:text", async (ctx) => {
     const content = ctx.message.text.toLowerCase();
-
-    let side;
-    if (/(?:🚀|buy|long|入|買い)/.test(content)) {
-      side = "buy";
-    } else if (/(?:sell|short|出|売り)/.test(content)) {
-      side = "sell";
-    }
-
-    if (!side) return;
+    const intent = detectTradeIntent(content);
+    if (!intent) return;
 
     if (!isAdmin(ctx.from.id)) {
       return ctx.reply("⛔ トレード権限がありません");
     }
 
-    // Try to detect coin name from message (e.g. "buy ETH", "ETH 買い")
-    const symbols = getSymbols();
-    let sym = getDefaultSymbol();
-    for (const s of symbols) {
-      const base = s.split("/")[0].toLowerCase();
-      if (content.includes(base)) {
-        sym = s;
-        break;
-      }
-    }
-    const amount = getTradeAmount(sym);
-
     try {
-      const result = await executeTrade(side, sym, amount);
-      await ctx.reply(
-        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @${formatPrice(result.average, result.symbol)} | ${result.status}`,
-      );
+      const sym = intent.symbol || getDefaultSymbol();
+      await ctx.reply(await handleTrade(intent.side, sym, getTradeAmount(sym)));
     } catch (e) {
       await ctx.reply(`❌ ${e.message}`);
     }

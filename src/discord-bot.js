@@ -1,9 +1,12 @@
 const { Client, Events, GatewayIntentBits } = require("discord.js");
-const { executeTrade, fetchPrice, fetchBalance, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol, resolveSymbol, getTradeAmount } = require("./exchange");
-const { onSignal, onDailySummary, getSignalStats, getRecentSignals, getTimeframe, setTimeframe, getValidTimeframes, getActiveSymbols } = require("./signal");
-const { log, error, uptimeFormatted } = require("./logger");
-const { isEnabled: stripeEnabled, createCheckoutSession, isSubscribed, getSubscriberCount } = require("./subscription");
+const { onSignal, onDailySummary } = require("./signal");
+const { log, error } = require("./logger");
 const { checkLimit } = require("./rate-limit");
+const {
+  handlePrices, handlePrice, handleStatus, handleBalance,
+  handleHistory, handleTimeframe, handleSubscribe, handleTrade,
+  detectTradeIntent, parseTradeArgs,
+} = require("./bot-commands");
 
 const MOD = "Discord";
 let client;
@@ -53,184 +56,75 @@ async function startDiscordBot() {
       return message.reply("⏳ レート制限中です。しばらくお待ちください。");
     }
 
-    // !ping
-    if (content === "!ping") {
-      return message.reply("pong #BTCto70k");
-    }
-
-    // !price [symbol] or !prices
-    if (content === "!prices") {
-      try {
-        const symbols = getSymbols();
-        const lines = await Promise.all(symbols.map(async (sym) => {
-          try {
-            const p = await fetchPrice(sym);
-            const base = getBaseCurrencyForSymbol(sym);
-            return `${base}: ${formatPrice(p.last, sym)} | H: ${formatPrice(p.high, sym)} | L: ${formatPrice(p.low, sym)}`;
-          } catch { return `${sym}: Error`; }
-        }));
-        return message.reply(lines.join("\n"));
-      } catch (e) {
-        return message.reply(`Error: ${e.message}`);
-      }
-    }
-
-    if (content === "!price" || content.startsWith("!price ")) {
-      try {
-        const parts = message.content.split(/\s+/);
-        const arg = parts[1];
-        const symbols = getSymbols();
-        let sym = getDefaultSymbol();
-        if (arg) {
-          const upper = arg.toUpperCase();
-          sym = symbols.find((s) => s === upper || s.startsWith(upper + "/")) || sym;
-        }
-        const p = await fetchPrice(sym);
-        return message.reply(
-          `${sym}: ${formatPrice(p.last, sym)} | H: ${formatPrice(p.high, sym)} | L: ${formatPrice(p.low, sym)}`,
-        );
-      } catch (e) {
-        return message.reply(`Error: ${e.message}`);
-      }
-    }
-
-    // !status
-    if (content === "!status") {
-      const stats = getSignalStats();
-      const lastAt = stats.lastSignalAt
-        ? new Date(stats.lastSignalAt).toLocaleString("ja-JP")
-        : "なし";
-      return message.reply(
-        [
-          `**Bot Status**`,
-          `Uptime: ${uptimeFormatted()}`,
-          `Exchange: ${process.env.EXCHANGE || "bitbank"} (Sandbox: ${process.env.SANDBOX || "true"})`,
-          `シグナル: BUY ${stats.totalBuy} / SELL ${stats.totalSell}`,
-          `最終シグナル: ${lastAt}`,
-          `履歴件数: ${stats.historyCount}`,
-          `サブスクライバー: ${getSubscriberCount()}`,
-        ].join("\n"),
-      );
-    }
-
-    // !balance
-    if (content === "!balance") {
-      if (!isAdmin(message.author.id)) {
-        return message.reply("⛔ 残高確認の権限がありません");
-      }
-      try {
-        const balances = await fetchBalance();
-        if (balances.length === 0) {
-          return message.reply("残高情報がありません");
-        }
-        const lines = balances.map((b) =>
-          `${b.currency}: ${b.free} (利用可能) / ${b.used} (注文中) / ${b.total} (合計)`,
-        );
-        return message.reply(
-          [`**資産状況**`, ...lines].join("\n"),
-        );
-      } catch (e) {
-        return message.reply(`Error: ${e.message}`);
-      }
-    }
-
-    // !history
-    if (content === "!history") {
-      const recent = getRecentSignals(5);
-      if (recent.length === 0) {
-        return message.reply("シグナル履歴なし");
-      }
-      const lines = recent.map((s) => {
-        const t = new Date(s.timestamp).toLocaleString("ja-JP");
-        const base = getBaseCurrencyForSymbol(s.symbol || getDefaultSymbol());
-        return `[${base}] ${s.side} ${formatPrice(s.price, s.symbol)} (${t})`;
-      });
-      return message.reply(
-        [`**直近シグナル (${recent.length}件)**`, ...lines].join("\n"),
-      );
-    }
-
-    // !timeframe
-    if (content === "!timeframe" || content.startsWith("!timeframe ") || content === "!tf" || content.startsWith("!tf ")) {
-      const parts = message.content.split(/\s+/);
-      const arg = parts[1];
-      if (!arg) {
-        return message.reply(
-          `現在のタイムフレーム: **${getTimeframe()}**\n有効: ${getValidTimeframes().join(", ")}\n使い方: \`!timeframe 5m\``,
-        );
-      }
-      const result = setTimeframe(arg);
-      if (!result.ok) {
-        return message.reply(result.error);
-      }
-      return message.reply(`タイムフレーム変更: ${result.prev} -> **${result.current}**`);
-    }
-
-    // !subscribe
-    if (content === "!subscribe") {
-      if (!stripeEnabled()) {
-        return message.reply("サブスクリプション: $5/月\n決済連携は準備中です。");
-      }
-      const sub = isSubscribed("discord", message.author.id);
-      if (sub) {
-        return message.reply("✅ サブスク有効です。#BTCto70k");
-      }
-      try {
-        const url = await createCheckoutSession(
-          "discord",
-          message.author.id,
-          message.author.username,
-        );
-        return message.reply(
-          `サブスクリプション: $5/月\n決済はこちら: ${url}`,
-        );
-      } catch (e) {
-        return message.reply(`Error: ${e.message}`);
-      }
-    }
-
-    // Trade detection: !trade buy [symbol] [amount] or !trade sell ETH 0.5
-    let side, tradeSymbol, amount;
-
-    const cmdMatch = content.match(/!trade\s+(buy|sell)(?:\s+([a-z][a-z0-9/]*)\s*([\d.]+)?|\s+([\d.]+))?/i);
-    if (cmdMatch) {
-      side = cmdMatch[1].toLowerCase();
-      if (cmdMatch[2]) tradeSymbol = resolveSymbol(cmdMatch[2]);
-      if (cmdMatch[3]) amount = parseFloat(cmdMatch[3]);
-      if (cmdMatch[4]) amount = parseFloat(cmdMatch[4]);
-    } else {
-      if (/(?:🚀|buy|long|入|買い)/.test(content)) {
-        side = "buy";
-      } else if (/(?:sell|short|出|売り)/.test(content)) {
-        side = "sell";
-      }
-      // Try to detect coin name from message (e.g. "buy ETH", "ETH 買い")
-      if (side) {
-        const symbols = getSymbols();
-        for (const s of symbols) {
-          const base = s.split("/")[0].toLowerCase();
-          if (content.includes(base)) {
-            tradeSymbol = s;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!side) return;
-
-    if (!isAdmin(message.author.id)) {
-      return message.reply("⛔ トレード権限がありません");
-    }
-
-    const sym = tradeSymbol || getDefaultSymbol();
-    const qty = amount || getTradeAmount(sym);
-
     try {
-      const result = await executeTrade(side, sym, qty);
-      message.reply(
-        `✅ ${result.side.toUpperCase()} ${result.symbol} | ID: ${result.id} | qty: ${result.qty} filled: ${result.filled} @${formatPrice(result.average, result.symbol)} | ${result.status}`,
-      );
+      // !ping
+      if (content === "!ping") {
+        return message.reply("pong #BTCto70k");
+      }
+
+      // !prices
+      if (content === "!prices") {
+        return message.reply(await handlePrices());
+      }
+
+      // !price [symbol]
+      if (content === "!price" || content.startsWith("!price ")) {
+        const arg = message.content.split(/\s+/)[1];
+        return message.reply(await handlePrice(arg));
+      }
+
+      // !status
+      if (content === "!status") {
+        return message.reply(handleStatus());
+      }
+
+      // !balance
+      if (content === "!balance") {
+        if (!isAdmin(message.author.id)) {
+          return message.reply("⛔ 残高確認の権限がありません");
+        }
+        return message.reply(await handleBalance());
+      }
+
+      // !history
+      if (content === "!history") {
+        return message.reply(handleHistory());
+      }
+
+      // !timeframe / !tf
+      if (/^!(?:timeframe|tf)(?:\s|$)/.test(content)) {
+        const arg = message.content.split(/\s+/)[1];
+        return message.reply(handleTimeframe(arg).text);
+      }
+
+      // !subscribe
+      if (content === "!subscribe") {
+        return message.reply(
+          await handleSubscribe("discord", message.author.id, message.author.username),
+        );
+      }
+
+      // !trade buy [symbol] [amount]
+      if (content.startsWith("!trade ")) {
+        if (!isAdmin(message.author.id)) {
+          return message.reply("⛔ トレード権限がありません");
+        }
+        const parts = message.content.split(/\s+/);
+        const { side, symbol, amount } = parseTradeArgs(parts[1], parts[2], parts[3]);
+        return message.reply(await handleTrade(side, symbol, amount));
+      }
+
+      // Text-based trade detection
+      const intent = detectTradeIntent(content);
+      if (intent) {
+        if (!isAdmin(message.author.id)) {
+          return message.reply("⛔ トレード権限がありません");
+        }
+        const { side, symbol } = intent;
+        const { getTradeAmount } = require("./exchange");
+        const sym = symbol || require("./exchange").getDefaultSymbol();
+        return message.reply(await handleTrade(side, sym, getTradeAmount(sym)));
+      }
     } catch (e) {
       message.reply(`❌ ${e.message}`);
     }

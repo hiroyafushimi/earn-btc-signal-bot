@@ -1,108 +1,35 @@
-const fs = require("fs");
-const path = require("path");
 const { fetchPrice, fetchOHLCV, getDefaultSymbol, getSymbols, formatPrice, getBaseCurrencyForSymbol, executeTrade, getTradeAmount } = require("./exchange");
 const { log, error } = require("./logger");
 const { analyzeIndicators, sma, rsi } = require("./indicators");
+const { saveSignal, getRecentSignals, getSignalStats, loadHistory } = require("./signal-store");
 
 const MOD = "Signal";
 const INTERVAL = parseInt(process.env.SIGNAL_INTERVAL || "60000", 10);
 const COOLDOWN = parseInt(process.env.SIGNAL_COOLDOWN || "300000", 10);
-const DATA_DIR = path.join(__dirname, "..", "data");
-const HISTORY_FILE = path.join(DATA_DIR, "signals.json");
 const DAILY_INTERVAL = 24 * 60 * 60 * 1000;
 
 const VALID_TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"];
 let currentTimeframe = process.env.SIGNAL_TIMEFRAME || "5m";
 
-// Auto-trade: execute trades automatically when signals meet strength threshold
-// AUTO_TRADE=true enables, AUTO_TRADE_MIN_STRENGTH=4 sets minimum strength (1-6)
-// AUTO_TRADE_SYMBOLS=ETH,XRP limits auto-trade to specific coins (empty = all monitored)
 const AUTO_TRADE = process.env.AUTO_TRADE === "true";
 const AUTO_TRADE_MIN_STRENGTH = parseInt(process.env.AUTO_TRADE_MIN_STRENGTH || "4", 10);
 const AUTO_TRADE_SYMBOLS = (() => {
   const raw = (process.env.AUTO_TRADE_SYMBOLS || "").trim();
-  if (!raw) return null; // null = all symbols
+  if (!raw) return null;
   return raw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
 })();
 
+const HTF_MAP = { "1m": "5m", "3m": "15m", "5m": "15m", "15m": "1h", "30m": "1h", "1h": "4h", "4h": "1d", "1d": "1d" };
+
 // Per-symbol state
-let priceHistories = {};  // { "BTC/USDT": [...], "ETH/USDT": [...] }
-let lastSignalTime = {};  // { "BTC/USDT:BUY": timestamp, ... }
-let signalCount = { buy: 0, sell: 0 };
-let lastSignalAt = null;
+let priceHistories = {};
+let lastSignalTime = {};
 
 let signalListeners = [];
 let summaryListeners = [];
 let timeframeListeners = [];
 let timer = null;
 let dailyTimer = null;
-let saveLock = false;
-
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-function loadHistory() {
-  ensureDataDir();
-  try {
-    if (fs.existsSync(HISTORY_FILE)) {
-      return JSON.parse(fs.readFileSync(HISTORY_FILE, "utf-8"));
-    }
-  } catch (e) {
-    error(MOD, "Failed to load history:", e.message);
-  }
-  return [];
-}
-
-function saveSignal(signal) {
-  ensureDataDir();
-  // Simple lock to prevent concurrent writes from multiple symbols
-  if (saveLock) {
-    setTimeout(() => saveSignal(signal), 50);
-    return;
-  }
-  saveLock = true;
-  try {
-    const history = loadHistory();
-    history.push(signal);
-    // Keep last 500 signals
-    const trimmed = history.slice(-500);
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(trimmed, null, 2));
-  } catch (e) {
-    error(MOD, "Failed to save signal:", e.message);
-  } finally {
-    saveLock = false;
-  }
-}
-
-function getRecentSignals(count = 5, symbol) {
-  const history = loadHistory();
-  const filtered = symbol
-    ? history.filter((s) => s.symbol === symbol)
-    : history;
-  return filtered.slice(-count);
-}
-
-function getSignalStats(symbol) {
-  if (symbol) {
-    const history = loadHistory();
-    const filtered = history.filter((s) => s.symbol === symbol);
-    return {
-      totalBuy: filtered.filter((s) => s.side === "BUY").length,
-      totalSell: filtered.filter((s) => s.side === "SELL").length,
-      lastSignalAt: filtered.length > 0 ? filtered[filtered.length - 1].timestamp : null,
-      historyCount: filtered.length,
-    };
-  }
-  return {
-    totalBuy: signalCount.buy,
-    totalSell: signalCount.sell,
-    lastSignalAt,
-    historyCount: loadHistory().length,
-  };
-}
 
 function onSignal(callback) {
   signalListeners.push(callback);
@@ -146,7 +73,6 @@ function getPriceHistory(symbol) {
   if (symbol) {
     return priceHistories[symbol] || [];
   }
-  // Backward compatibility: return default symbol's history
   return priceHistories[getDefaultSymbol()] || [];
 }
 
@@ -196,8 +122,6 @@ function analyze(priceObjs, symbol) {
   const current = prices[prices.length - 1];
   const isBuy = result.side === "BUY";
 
-  // Use appropriate precision: round to integer for high-price (JPY, BTC),
-  // keep decimals for low-price coins
   const roundPrice = (v) => {
     if (v >= 100) return Math.round(v);
     if (v >= 1) return Math.round(v * 100) / 100;
@@ -225,7 +149,7 @@ function isCooldownActive(symbol, side) {
 }
 
 function isAutoTradeTarget(symbol) {
-  if (!AUTO_TRADE_SYMBOLS) return true; // all symbols
+  if (!AUTO_TRADE_SYMBOLS) return true;
   const base = getBaseCurrencyForSymbol(symbol);
   return AUTO_TRADE_SYMBOLS.includes(base);
 }
@@ -233,9 +157,6 @@ function isAutoTradeTarget(symbol) {
 async function emitSignal(signal) {
   const key = `${signal.symbol}:${signal.side}`;
   lastSignalTime[key] = Date.now();
-  lastSignalAt = Date.now();
-  signalCount[signal.side.toLowerCase()] =
-    (signalCount[signal.side.toLowerCase()] || 0) + 1;
 
   // Auto-trade execution (before save/format so results are included)
   if (AUTO_TRADE && signal.strength >= AUTO_TRADE_MIN_STRENGTH && isAutoTradeTarget(signal.symbol)) {
@@ -254,7 +175,7 @@ async function emitSignal(signal) {
     }
   }
 
-  saveSignal(signal);
+  await saveSignal(signal);
 
   const message = formatSignal(signal);
   log(MOD, `Signal: ${signal.symbol} ${signal.side} @${formatPrice(signal.price, signal.symbol)}`);
@@ -299,9 +220,7 @@ async function tickSymbol(symbol) {
         return;
       }
 
-      // 上位時間足で確認
-      const htfMap = { "1m": "5m", "3m": "15m", "5m": "15m", "15m": "1h", "30m": "1h", "1h": "4h", "4h": "1d", "1d": "1d" };
-      const htf = htfMap[currentTimeframe] || "1h";
+      const htf = HTF_MAP[currentTimeframe] || "1h";
       try {
         const candlesHTF = await fetchOHLCV(symbol, htf, 30);
         if (candlesHTF.length >= 21) {
@@ -327,12 +246,11 @@ async function tickSymbol(symbol) {
 
 async function tick() {
   const symbols = getSymbols();
-  // Process all symbols concurrently
   await Promise.allSettled(symbols.map((symbol) => tickSymbol(symbol)));
 }
 
 async function emitDailySummary() {
-  const history = loadHistory();
+  const history = await loadHistory();
   const oneDayAgo = Date.now() - DAILY_INTERVAL;
   const todaySignals = history.filter((s) => s.timestamp > oneDayAgo);
   const symbols = getSymbols();
